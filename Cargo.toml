@@ -1,0 +1,28 @@
+[package]
+name = "redclust"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "redclust"
+crate-type = ["cdylib"]
+
+[dependencies]
+accessory = "2.0.0"
+anyhow = "1.0.98"
+derive_more = { version = "2.0.1", features = ["display", "debug"] }
+itertools = "0.14.0"
+kmedoids = "0.5.3"
+ndarray = { version = "0.16.1", features = ["rayon"] }
+ndarray-linalg = "0.17.0"
+numpy = "0.24.0"
+pyo3 = { version = "0.24.0", features = [
+	"extension-module",
+	"anyhow",
+	"multiple-pymethods",
+] }
+rand = { version = "0.8.5", features = ["small_rng"] }
+rayon = "1.10.0"
+special = "0.11.4"
+statrs = { version = "0.18.0", default-features = false, features = ["rand"] }
