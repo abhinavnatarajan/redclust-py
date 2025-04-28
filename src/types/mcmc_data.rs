@@ -1,4 +1,7 @@
-use std::fmt::{Debug, Display, Formatter};
+use std::{
+	fmt::{Debug, Display, Formatter},
+	num::NonZeroUsize,
+};
 
 use accessory::Accessors;
 use anyhow::{Result, anyhow};
@@ -11,92 +14,83 @@ use super::ClusterLabel;
 use crate::types::Array2Wrapper;
 
 /// Struct to hold the dissimilarities matrix.
-#[derive(Debug, Clone, Accessors, Default, PartialEq)]
+#[derive(Debug, Clone, Accessors, PartialEq)]
 #[pyclass(str)]
 pub struct MCMCData {
 	/// Dissimlarities matrix.
 	pub(crate) diss_mat: Array2Wrapper<f64>,
 
 	/// Element-wise log of the dissimilarities matrix.
-	pub(crate) log_diss_mat: Array2Wrapper<f64>,
-
-	/// Raw data
-	pub(crate) points: Option<Array2Wrapper<f64>>,
+	pub(crate) ln_diss_mat: Array2Wrapper<f64>,
 }
 
 impl MCMCData {
-	/// Check whether a matrix has symmetric positive-definite entries.
+	/// Check whether a matrix is nonempty, and has symmetric non-negative
+	/// entries that are zero on the diagonal.
 	fn validate_diss_mat(diss_mat: Array2<f64>) -> Result<Array2<f64>> {
 		if diss_mat.nrows() != diss_mat.ncols() // not square
+			|| diss_mat.is_empty() // empty
 			|| Zip::from(&diss_mat).any(|&x| x < 0.0)
 			|| Zip::from(&diss_mat.diag()).any(|&x| x != 0.0)
 			|| Zip::from(&diss_mat).and(&diss_mat.t()).any(|&x, &y| x != y)
 		{
 			return Err(anyhow!(
-				"Dissimilarities must be symmetric and positive-definite."
+				"Dissimilarities must be non-empty, and symmetric with nonnegative entries and \
+				 zero diagonal."
 			));
 		}
 		Ok(diss_mat)
 	}
 
 	/// Create a new MCMCData instance with the specified dissimilarities
-	/// matrix.
+	/// matrix. The matrix must be non-empty, symmetric, with non-negative
+	/// entries that are zero on the diagonal.
 	pub fn from_diss_mat(diss_mat: Array2<f64>) -> Result<Self> {
 		Self::validate_diss_mat(diss_mat)
 			.map(|diss_mat| {
-				let log_diss_mat = diss_mat.mapv(|x| x.ln());
+				let ln_diss_mat = diss_mat.mapv(|x| x.ln());
 				MCMCData {
 					diss_mat: Array2Wrapper(diss_mat),
-					log_diss_mat: Array2Wrapper(log_diss_mat),
-					points: None,
+					ln_diss_mat: Array2Wrapper(ln_diss_mat),
 				}
 			})
 			.map_err(|e| anyhow!("Error initialising MCMCData: {}", e))
 	}
 
 	/// Create a new MCMCData instance with the specified point cloud using the
-	/// standard Euclidean 2-norm.
-	pub fn from_points(points: Array2<f64>, diss_mat: Option<Array2<f64>>) -> Result<Self> {
+	/// standard Euclidean 2-norm. The input should be a non-empty 2D array of
+	/// shape (n_pts, n_dims).
+	pub fn from_points(points: Array2<f64>) -> Result<Self> {
 		let n_pts = points.nrows();
+		if n_pts == 0 {
+			return Err(anyhow!("Point cloud cannot be empty"));
+		}
 
-		let diss_mat = diss_mat
-			.and_then(|x| Self::validate_diss_mat(x).ok())
-			.unwrap_or_else(|| {
-				let temp = Array2::<f64>::from_shape_fn((n_pts, n_pts), |(i, j)| {
-					if i <= j {
-						0.0
-					} else {
-						(&points.row(i) - &points.row(j)).norm_l2()
-					}
-				});
-				&temp + &temp.t()
+		let diss_mat = {
+			let temp = Array2::<f64>::from_shape_fn((n_pts, n_pts), |(i, j)| {
+				if i <= j {
+					0.0
+				} else {
+					(&points.row(i) - &points.row(j)).norm_l2()
+				}
 			});
+			&temp + &temp.t()
+		};
 
-		let log_diss_mat = diss_mat.mapv(|x| x.ln());
+		let ln_diss_mat = diss_mat.mapv(|x| x.ln());
 		Ok(MCMCData {
 			diss_mat: Array2Wrapper(diss_mat),
-			log_diss_mat: Array2Wrapper(log_diss_mat),
-			points: Some(Array2Wrapper(points.clone())),
+			ln_diss_mat: Array2Wrapper(ln_diss_mat),
 		})
 	}
 
-	/// Update the dissimilarities matrix.
+	/// Update the dissimilarities matrix. The new matrix must be non-empty,
+	/// symmetric, with non-negative entries that are zero on the diagonal.
 	pub fn set_diss_mat(&mut self, diss_mat: Array2<f64>) -> Result<&mut Self> {
-		if let Some(points) = &self.points {
-			if diss_mat.nrows() != points.0.nrows() {
-				return Err(anyhow!(
-					"Error settings dissimilarities matrix: given matrix has {} rows, but current \
-					 point cloud has {} elements. Consider constructing a new instance of \
-					 MCMCData instead.",
-					diss_mat.nrows(),
-					points.0.nrows()
-				));
-			}
-		}
 		Self::validate_diss_mat(diss_mat)
 			.map(|diss_mat| {
 				self.diss_mat = Array2Wrapper(diss_mat);
-				self.log_diss_mat = Array2Wrapper(self.diss_mat.0.mapv(|x| x.ln()));
+				self.ln_diss_mat = Array2Wrapper(self.diss_mat.0.mapv(|x| x.ln()));
 				self
 			})
 			.map_err(|e| anyhow!("Error setting dissimilarities matrix: {}", e))
@@ -105,6 +99,12 @@ impl MCMCData {
 	/// Get a reference to the dissimilarities matrix owned by this object.
 	#[inline(always)]
 	pub fn diss_mat(&self) -> &Array2<f64> { &self.diss_mat.0 }
+
+	/// Number of points in the data.
+	#[inline(always)]
+	pub fn n_pts(&self) -> NonZeroUsize {
+		unsafe { NonZeroUsize::new_unchecked(self.diss_mat.0.nrows()) }
+	}
 
 	/// Given cluster labels, return the set of all within-cluster
 	/// dissimilarities.
@@ -158,7 +158,8 @@ impl MCMCData {
 #[pymethods]
 impl MCMCData {
 	/// Create a new MCMCData instance with the specified dissimilarities
-	/// matrix.
+	/// matrix. The matrix must be non-empty, symmetric, with non-negative
+	/// entries that are zero on the diagonal.
 	#[classmethod]
 	#[pyo3(name = "from_diss_mat")]
 	fn py_from_diss_mat(
@@ -169,14 +170,16 @@ impl MCMCData {
 	}
 
 	/// Create a new MCMCData instance with the specified point cloud using the
-	/// standard Euclidean 2-norm.
+	/// standard Euclidean 2-norm. The input should be a non-empty 2D array of
+	/// shape (n_pts, n_dims).
 	#[classmethod]
 	#[pyo3(name = "from_points")]
 	fn py_from_points(_cls: Bound<'_, PyType>, points: Bound<'_, PyArray2<f64>>) -> Result<Self> {
-		Self::from_points(points.to_owned_array(), None)
+		Self::from_points(points.to_owned_array())
 	}
 
-	/// Update the dissimilarities matrix.
+	/// Update the dissimilarities matrix. The new matrix must be non-empty,
+	/// symmetric, with non-negative entries that are zero on the diagonal.
 	#[setter(diss_mat)]
 	fn py_set_diss_mat(&mut self, diss_mat: Bound<'_, PyArray2<f64>>) -> Result<()> {
 		self.set_diss_mat(diss_mat.to_owned_array()).map(|_| ())
@@ -214,8 +217,8 @@ impl MCMCData {
 
 	fn __repr__(&self) -> String {
 		format!(
-			"MCMCData(dis_mat={:#?}, log_dis_mat={:#?})",
-			self.diss_mat.0, self.log_diss_mat.0
+			"MCMCData(dis_mat={:#?}, ln_dis_mat={:#?})",
+			self.diss_mat.0, self.ln_diss_mat.0
 		)
 	}
 }
@@ -224,8 +227,8 @@ impl Display for MCMCData {
 	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
 		write!(
 			f,
-			"MCMCData {{\ndis_mat:\n{}\nlog_dis_mat:\n{}\n}}",
-			self.diss_mat, self.log_diss_mat
+			"MCMCData {{\ndis_mat:\n{}\nln_dis_mat:\n{}\n}}",
+			self.diss_mat, self.ln_diss_mat
 		)
 	}
 }

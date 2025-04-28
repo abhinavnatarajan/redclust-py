@@ -1,6 +1,7 @@
 use std::{
-	collections::HashMap,
+	collections::BTreeSet,
 	fmt::{Debug, Display, Formatter},
+	num::NonZeroUsize,
 };
 
 use accessory::Accessors;
@@ -11,7 +12,7 @@ use pyo3::prelude::*;
 use crate::types::ClusterLabel;
 
 /// Current state of the MCMC sampler.
-#[derive(Debug, Clone, Accessors, PartialEq, Default)]
+#[derive(Debug, Clone, Accessors, PartialEq)]
 #[access(get)]
 #[pyclass(get_all, str, eq)]
 pub struct MCMCState {
@@ -31,11 +32,11 @@ pub struct MCMCState {
 
 	/// Cluster sizes.
 	#[access(get(cp = false))]
-	pub(crate) clust_sizes: HashMap<ClusterLabel, usize>,
+	pub(crate) clust_sizes: Vec<usize>,
 
 	/// List of labels of non-empty clusters.
 	#[access(get(cp = false))]
-	pub(crate) clust_list: Vec<ClusterLabel>,
+	pub(crate) clust_list: BTreeSet<ClusterLabel>,
 }
 
 impl MCMCState {
@@ -60,12 +61,33 @@ impl MCMCState {
 	}
 
 	/// Set the cluster allocations. Useful to initialize a custom state when
-	/// starting the MCMC sampler.
-	pub fn set_clusts(&mut self, clusts: Vec<ClusterLabel>) -> &mut Self {
-		// We don't assume contiguity of cluster labels.
+	/// starting the MCMC sampler. The clusters must be in the range [0, n_pts),
+	/// but are not required to be contiguous.
+	pub fn set_clusts(&mut self, clusts: Vec<ClusterLabel>) -> Result<&mut Self> {
+		let n_pts = clusts.len();
+		if n_pts == 0 {
+			return Err(anyhow!("Cluster allocation cannot be empty"));
+		}
+		if n_pts as u64 >= ClusterLabel::MAX as u64 {
+			return Err(anyhow!(
+				"Too many points; this library only supports up to {} points",
+				ClusterLabel::MAX
+			));
+		}
+		if *clusts.iter().max().unwrap() as usize >= n_pts {
+			return Err(anyhow!("Cluster labels must be in the range [0, n_pts)"));
+		}
 		self.clust_labels = clusts;
-		self.clust_sizes = self.clust_labels.clone().into_iter().counts();
-		self
+		self.clust_sizes = vec![0; self.clust_labels.len()];
+		self.clust_labels
+			.iter()
+			.counts()
+			.into_iter()
+			.for_each(|(k, v)| {
+				self.clust_sizes[*k as usize] = v;
+				self.clust_list.insert(*k);
+			});
+		Ok(self)
 	}
 }
 
@@ -73,8 +95,15 @@ impl MCMCState {
 impl MCMCState {
 	#[new]
 	pub fn new(clusts: Vec<ClusterLabel>, r: f64, p: f64) -> Result<Self> {
-		let mut res = MCMCState::default();
-		res.set_clusts(clusts).set_r(r)?.set_p(p)?;
+		let mut res = MCMCState {
+			clust_labels: Vec::new(),
+			r: 1.0,
+			p: 0.5,
+			r_accepted: true,
+			clust_sizes: Vec::new(),
+			clust_list: BTreeSet::new(),
+		}; // we don't implement Default for MCMCState because an empty cluster list is invalid
+		res.set_clusts(clusts)?.set_r(r)?.set_p(p)?;
 		Ok(res)
 	}
 
@@ -82,7 +111,7 @@ impl MCMCState {
 	/// starting the MCMC sampler.
 	#[setter(clusts)]
 	fn py_set_clusts(&mut self, clusts: Vec<ClusterLabel>) -> Result<()> {
-		self.set_clusts(clusts);
+		self.set_clusts(clusts)?;
 		Ok(())
 	}
 
@@ -104,7 +133,9 @@ impl MCMCState {
 
 	/// Number of clusters.
 	#[inline(always)]
-	pub fn n_clusts(&self) -> usize { self.clust_list.len() }
+	pub fn n_clusts(&self) -> NonZeroUsize {
+		unsafe { NonZeroUsize::new_unchecked(self.clust_list.len()) }
+	}
 }
 
 impl Display for MCMCState {

@@ -1,5 +1,6 @@
 use std::{
 	fmt::{Debug, Display, Formatter},
+	num::NonZeroUsize,
 	ops::RangeInclusive,
 };
 
@@ -18,10 +19,10 @@ const DEFAULT_SIGMA: f64 = 1.0;
 const DEFAULT_PROPOSALSD_R: f64 = 1.0;
 const DEFAULT_U: f64 = 1.0;
 const DEFAULT_V: f64 = 1.0;
-const DEFAULT_N_CLUSTS_INIT: usize = 1;
+const DEFAULT_N_CLUSTS_INIT: NonZeroUsize = NonZeroUsize::new(1).unwrap();
 const DEFAULT_REPULSION: bool = true;
-const DEFAULT_N_CLUSTS_MIN: usize = 1;
-const DEFAULT_N_CLUSTS_MAX: usize = usize::MAX;
+const DEFAULT_N_CLUSTS_MIN: NonZeroUsize = NonZeroUsize::new(1).unwrap();
+const DEFAULT_N_CLUSTS_MAX: NonZeroUsize = NonZeroUsize::new(usize::MAX).unwrap();
 
 /// Prior hyper-parameters for the Bayesian distance clustering algorithm.
 #[derive(Debug, Clone, Copy, Accessors, PartialEq)]
@@ -104,7 +105,7 @@ pub struct PriorHyperParams {
 	/// Initial number of clusters to begin the MCMC.
 	/// The actual clustering will be determined by a k-medoids algorithm.
 	#[pyo3(get)]
-	pub(crate) n_clusts_init: usize,
+	pub(crate) n_clusts_init: NonZeroUsize,
 
 	/// Whether to use repulsive terms in the likelihood function when
 	/// clustering.
@@ -114,11 +115,11 @@ pub struct PriorHyperParams {
 
 	/// Minimum number of clusters to allow in the clustering.
 	#[pyo3(get)]
-	pub(crate) n_clusts_min: usize,
+	pub(crate) n_clusts_min: NonZeroUsize,
 
 	/// Maximum number of clusters to allow in the clustering.
 	#[pyo3(get)]
-	pub(crate) n_clusts_max: usize,
+	pub(crate) n_clusts_max: NonZeroUsize,
 }
 
 impl PriorHyperParams {
@@ -222,7 +223,7 @@ impl PriorHyperParams {
 	}
 
 	/// Set the hyperparameter n_clusts_init.
-	pub fn set_n_clusts_init(&mut self, n_clusts_init: usize) -> Result<&mut Self> {
+	pub fn set_n_clusts_init(&mut self, n_clusts_init: NonZeroUsize) -> Result<&mut Self> {
 		if !(self.n_clusts_min..=self.n_clusts_max).contains(&n_clusts_init) {
 			return Err(anyhow!(
 				"n_clusts_init must be in the range [{}, {}]",
@@ -237,10 +238,10 @@ impl PriorHyperParams {
 	/// Set the range of allowed values for the number of clusters.
 	pub fn set_n_clusts_range(
 		&mut self,
-		n_clusts_range: RangeInclusive<usize>,
+		n_clusts_range: RangeInclusive<NonZeroUsize>,
 	) -> Result<&mut Self> {
-		if n_clusts_range.is_empty() || n_clusts_range.contains(&0) {
-			return Err(anyhow!("Range must be non-empty and cannot contain zero"));
+		if n_clusts_range.is_empty() {
+			return Err(anyhow!("Range must be non-empty"));
 		}
 		self.n_clusts_min = *n_clusts_range.start();
 		self.n_clusts_max = *n_clusts_range.end();
@@ -329,18 +330,23 @@ impl PriorHyperParams {
 
 	/// Set the hyperparameter n_clusts_init.
 	#[setter(n_clusts_init)]
-	fn py_set_n_clusts_init(this: Bound<'_, Self>, n_clusts_init: usize) -> Result<()> {
+	fn py_set_n_clusts_init(this: Bound<'_, Self>, n_clusts_init: NonZeroUsize) -> Result<()> {
 		this.borrow_mut().set_n_clusts_init(n_clusts_init)?;
 		Ok(())
 	}
 
 	/// Get the range of allowed values for the number of clusters.
 	#[getter(n_clusts_range)]
-	fn py_get_n_clusts_range(&self) -> (usize, usize) { (self.n_clusts_min, self.n_clusts_max) }
+	fn py_get_n_clusts_range(&self) -> (NonZeroUsize, NonZeroUsize) {
+		(self.n_clusts_min, self.n_clusts_max)
+	}
 
 	/// Set the range of allowed values for the number of clusters.
 	#[setter(n_clusts_range)]
-	fn py_set_n_clusts_range(this: Bound<'_, Self>, n_clusts_range: (usize, usize)) -> Result<()> {
+	fn py_set_n_clusts_range(
+		this: Bound<'_, Self>,
+		n_clusts_range: (NonZeroUsize, NonZeroUsize),
+	) -> Result<()> {
 		this.borrow_mut()
 			.set_n_clusts_range(n_clusts_range.0..=n_clusts_range.1)?;
 		Ok(())

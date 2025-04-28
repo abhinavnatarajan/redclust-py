@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::repeat_n};
+use std::{collections::HashMap, iter::repeat_n, num::NonZeroUsize};
 
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
@@ -14,17 +14,25 @@ impl MCMCData {
 	/// initialized state for the sampler.
 	pub fn fit_prior(
 		&self,
-		kmin: usize,
-		kmax: usize,
+		kmin: NonZeroUsize,
+		kmax: NonZeroUsize,
+		n_samples_n_clusts: NonZeroUsize,
 		repulsion: bool,
 		// method: PriorClusteringMethod,
 		rng: &mut SmallRng,
 	) -> Result<(PriorHyperParams, MCMCState)> {
-		let n_pts = self.diss_mat.0.nrows();
+		// We can use unsafe here because we enforce that MCMCData never has an empty
+		// dissimilarity matrix.
+		let n_pts = self.n_pts();
 		let kmin = kmin.min(n_pts);
 		let kmax = kmax.min(n_pts);
 		let mut res = PriorHyperParams::default();
 		res.set_n_clusts_range(kmin..=kmax)?;
+
+		let kmin = kmin.get();
+		let kmax = kmax.get();
+		let n_pts = n_pts.get();
+
 		// Set of within-cluster distances
 		let mut a = Vec::<f64>::new();
 		// Set of inter-cluster distances
@@ -68,12 +76,14 @@ impl MCMCData {
 		.collect_vec();
 
 		// Partition prior parameters
-		let (r_samples, p_samples) = pre_sample_rp(
-			&clust_labels,
-			&PriorHyperParams::default(),
-			&MCMCOptions::default(),
-			rng,
-		)?;
+		let (r_samples, p_samples) = unsafe {
+			pre_sample_rp(
+				&clust_labels,
+				&PriorHyperParams::default(),
+				&MCMCOptions::default(),
+				rng,
+			)?
+		};
 		let proposalsd_r = r_samples.std(0.0);
 		let (eta, sigma) = fit_gamma(
 			&r_samples,
@@ -101,7 +111,11 @@ impl MCMCData {
 		// Use the partition prior parameters to sample the induced prior on the number
 		// of clusters
 		let k_prior = pmf(params
-			.sample_n_clusts(n_pts, 10000, rng)
+			.sample_n_clusts(
+				unsafe { NonZeroUsize::new_unchecked(n_pts) },
+				n_samples_n_clusts,
+				rng,
+			)
 			.as_slice()
 			.unwrap());
 
@@ -165,7 +179,7 @@ impl MCMCData {
 	}
 }
 
-pub(crate) fn pre_sample_rp(
+pub(crate) unsafe fn pre_sample_rp(
 	clust_labels: &[ClusterLabel],
 	params: &PriorHyperParams,
 	options: &MCMCOptions,
@@ -175,18 +189,15 @@ pub(crate) fn pre_sample_rp(
 	let p = params.sample_r(1, rng)[0];
 	let mut state = MCMCState::new(clust_labels.to_owned(), r, p)?;
 	let n_samples = options.n_samples();
-	let n_iter = options.n_iter;
-	let n_burnin = options.n_burnin;
-	let thinning = options.thinning;
 	let (mut r_samples, mut p_samples) =
 		(Vec::with_capacity(n_samples), Vec::with_capacity(n_samples));
 	if n_samples != 0 {
-		for _ in 0..n_burnin {
-			state.sample_r(params, rng).sample_p(params, rng);
+		for _ in 0..options.n_burnin {
+			state.sample_r_conditional(params, rng).sample_p_conditional(params, rng);
 		}
-		for i in n_burnin..n_iter {
-			state.sample_r(params, rng).sample_p(params, rng);
-			if (i - n_burnin) % thinning == 0 {
+		for i in options.n_burnin..options.n_iter {
+			state.sample_r_conditional(params, rng).sample_p_conditional(params, rng);
+			if (i - options.n_burnin) % options.thinning == 0 {
 				r_samples.push(state.r);
 				p_samples.push(state.p);
 			}

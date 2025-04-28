@@ -6,7 +6,7 @@ use pyo3::{prelude::*, types::PyDict};
 
 use crate::types::{Array2Wrapper, ClusterLabel, MCMCOptions, PriorHyperParams};
 
-#[derive(Debug, Clone, Accessors, PartialEq, Default)]
+#[derive(Debug, Clone, Accessors, PartialEq)]
 #[access(get, defaults(get(cp)))]
 #[pyclass(get_all, str)]
 /// Result from the MCMC sampler

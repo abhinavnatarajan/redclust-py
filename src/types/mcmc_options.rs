@@ -40,26 +40,15 @@ pub struct MCMCOptions {
 }
 
 impl MCMCOptions {
-	/// Set the number of Gibbs steps
+	/// Set the number of Gibbs and Metropolis steps
 	/// for each iteration of the cluster sampling.
-	pub fn set_n_gibbs(&mut self, n_gibbs: usize) -> Result<&mut Self> {
-		if n_gibbs + self.n_mh == 0 {
+	pub fn set_n_gibbs_mh(&mut self, n_gibbs: usize, n_mh: usize) -> Result<&mut Self> {
+		if n_gibbs + n_mh == 0 {
 			return Err(anyhow!(
 				"At least one Gibbs or Metropolis step must be performed"
 			));
 		}
 		self.n_gibbs = n_gibbs;
-		Ok(self)
-	}
-
-	/// Set the number of Metropolis-Hastings steps
-	/// for each iteration of the cluster sampling.
-	pub fn set_n_mh(&mut self, n_mh: usize) -> Result<&mut Self> {
-		if self.n_gibbs + n_mh == 0 {
-			return Err(anyhow!(
-				"At least one Gibbs or Metropolis step must be performed"
-			));
-		}
 		self.n_mh = n_mh;
 		Ok(self)
 	}
@@ -83,17 +72,9 @@ impl Default for MCMCOptions {
 impl MCMCOptions {
 	/// Set the number of Gibbs steps
 	/// for each iteration of the cluster sampling.
-	#[setter(n_gibbs)]
-	fn py_set_n_gibbs(this: Bound<'_, Self>, n_gibbs: usize) -> Result<()> {
-		this.borrow_mut().set_n_gibbs(n_gibbs)?;
-		Ok(())
-	}
-
-	/// Set the number of Metropolis-Hastings steps
-	/// for each iteration of the cluster sampling.
-	#[setter(n_mh)]
-	fn py_set_n_mh(this: Bound<'_, Self>, n_mh: usize) -> Result<()> {
-		this.borrow_mut().set_n_mh(n_mh)?;
+	#[pyo3(name = "set_n_gibbs_mh")]
+	fn py_set_n_gibbs_mh(this: Bound<'_, Self>, n_gibbs: usize, n_mh: usize) -> Result<()> {
+		this.borrow_mut().set_n_gibbs_mh(n_gibbs, n_mh)?;
 		Ok(())
 	}
 
@@ -129,7 +110,7 @@ impl MCMCOptions {
 			n_gibbs: 1,
 			n_mh: 1,
 		};
-		res.set_n_gibbs(n_gibbs)?.set_n_mh(n_mh)?;
+		res.set_n_gibbs_mh(n_gibbs, n_mh)?;
 		Ok(res)
 	}
 
