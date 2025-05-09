@@ -1,10 +1,13 @@
 use std::fmt::{Debug, Display, Formatter};
 
 use accessory::Accessors;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use pyo3::{prelude::*, types::PyDict};
 
-use crate::types::{Array2Wrapper, ClusterLabel, MCMCOptions, PriorHyperParams};
+use crate::{
+	types::{Array2Wrapper, ClusterLabel, MCMCOptions, PriorHyperParams},
+	utils::float_vec_max,
+};
 
 #[derive(Debug, Clone, Accessors, PartialEq)]
 #[access(get, defaults(get(cp)))]
@@ -133,23 +136,15 @@ pub enum PointEstimator {
 #[pymethods]
 impl MCMCResult {
 	/// Point estimate clustering.
-	pub fn point_estimate(&self, method: PointEstimator) -> Vec<ClusterLabel> {
+	pub fn point_estimate(&self, method: PointEstimator) -> Result<Vec<ClusterLabel>> {
 		let objective = match method {
 			PointEstimator::MaxPosteriorProb => &self.ln_posterior,
 			PointEstimator::MaxLikelihood => &self.ln_lik,
 		};
-		let idx = objective
-			.iter()
-			.enumerate()
-			.fold((0, f64::INFINITY), |(i, best_prob), (j, &prob)| {
-				if prob > best_prob {
-					(j, prob)
-				} else {
-					(i, best_prob)
-				}
-			})
+		let idx = float_vec_max(objective)
+			.map_err(|e| anyhow!("Error while optimising objective: {}", e))?
 			.0;
-		self.clusts[idx].clone()
+		Ok(self.clusts[idx].clone())
 	}
 
 	/// Convert the MCMCResult to a dictionary.
@@ -186,7 +181,7 @@ impl MCMCResult {
 		dict.set_item("loglik", &me.ln_lik)?;
 		dict.set_item("logposterior", &me.ln_posterior)?;
 		dict.set_item("options", me.options)?;
-		dict.set_item("params", me.params)?;
+		dict.set_item("params", me.params.clone())?;
 		Ok(dict)
 	}
 }

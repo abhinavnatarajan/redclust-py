@@ -16,6 +16,7 @@ itertools = "0.14.0"
 kmedoids = "0.5.3"
 ndarray = { version = "0.16.1", features = ["rayon"] }
 ndarray-linalg = "0.17.0"
+num-traits = "0.2.19"
 numpy = "0.24.0"
 pyo3 = { version = "0.24.0", features = [
 	"extension-module",
@@ -26,3 +27,12 @@ rand = { version = "0.8.5", features = ["small_rng"] }
 rayon = "1.10.0"
 special = "0.11.4"
 statrs = { version = "0.18.0", default-features = false, features = ["rand"] }
+
+[features]
+default = ["openblas-static"]
+openblas-static = ["ndarray-linalg/openblas-static"]
+openblas-system = ["ndarray-linalg/openblas-system"]
+netlib-static = ["ndarray-linalg/netlib-static"]
+netlib-system = ["ndarray-linalg/netlib-system"]
+intel-mkl-static = ["ndarray-linalg/intel-mkl-static"]
+intel-mkl-system = ["ndarray-linalg/intel-mkl-system"]

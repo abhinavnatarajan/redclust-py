@@ -1,9 +1,10 @@
 use std::time::Instant;
 
-use itertools::{Itertools, iproduct};
+use anyhow::{Result, anyhow};
+use itertools::Itertools;
 use ndarray::{Array1, Array2, s};
 use pyo3::prelude::*;
-use rand::rngs::SmallRng;
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use rayon::prelude::*;
 use statrs::{
 	distribution::{Beta, Continuous, Gamma},
@@ -14,31 +15,15 @@ use crate::{
 	MCMCOptions,
 	MCMCResult,
 	types::{Array2Wrapper, MCMCData, MCMCState, PriorHyperParams},
+	utils::{num_pairs, symm_mat_sum},
 };
-
-/// Non-short-circuiting version of iter().position()
-pub(crate) fn findall<T, F>(v: &[T], f: F) -> Vec<usize>
-where
-	T: Copy,
-	F: Fn(&T) -> bool,
-{
-	v.iter()
-		.enumerate()
-		.filter_map(|(i, x)| if f(x) { Some(i) } else { None })
-		.collect_vec()
-}
-
-fn num_pairs(n: u64) -> u64 { n * (n - 1) / 2 }
-
-fn symm_mat_sum(mat: &Array2<f64>, rows: &[usize], cols: &[usize]) -> f64 {
-	iproduct!(rows.iter(), cols.iter())
-		.map(|(&i, &j)| mat[(i, j)])
-		.sum()
-}
 
 // Mean, variance, autocorrelation function, integrated autocorrelation time,
 // and effective sample size.
 fn aux_stats(x: &Array1<f64>) -> (f64, f64, Vec<f64>, f64, f64) {
+	if x.is_empty() {
+		return (0.0, 0.0, vec![], 0.0, 0.0);
+	}
 	let lags = (0..(x.len() - 1).min(10 * (x.len() as f64).log10() as usize)).collect_vec();
 	let n = x.len();
 	let mean = x.mean().unwrap();
@@ -58,15 +43,15 @@ fn aux_stats(x: &Array1<f64>) -> (f64, f64, Vec<f64>, f64, f64) {
 }
 
 /// Log-likelihood of the clustering, which depends on the data and the cluster
-/// labels.
-#[pyfunction]
+/// labels. Will only consider the first n points in the data where
+/// ``n=state.clust_labels.len()``.
 pub fn ln_likelihood(data: &MCMCData, state: &MCMCState, params: &PriorHyperParams) -> f64 {
 	let clust_labels = &state.clust_labels;
 	let clust_list = state.clust_list.iter().copied().collect_vec();
-	let diss_mat = &data.diss_mat.0;
-	let log_diss_mat = &data.ln_diss_mat.0;
-	let alpha = params.alpha;
-	let beta = params.beta;
+	let diss_mat = data.diss_mat();
+	let ln_diss_mat = data.ln_diss_mat();
+	let alpha = params.alpha();
+	let beta = params.beta();
 	let alpha_beta_ratio = alpha * beta.ln() - ln_gamma(alpha);
 	let delta1 = params.delta1();
 	let lgamma_delta1 = ln_gamma(delta1);
@@ -75,12 +60,12 @@ pub fn ln_likelihood(data: &MCMCData, state: &MCMCState, params: &PriorHyperPara
 	let lik_cohesive = clust_list
 		.par_iter()
 		.map(|k| {
-			let clust_k = findall(clust_labels, |x| *x == *k);
+			let clust_k = clust_labels.iter().positions(|x| *x == *k).collect_vec();
 			let sz_k = clust_k.len();
 			let num_pairs_k = num_pairs(sz_k as u64) as f64;
 			let a = alpha + delta1 * num_pairs_k;
 			let b = beta + symm_mat_sum(diss_mat, &clust_k, &clust_k);
-			(delta1 - 1.0) * symm_mat_sum(log_diss_mat, &clust_k, &clust_k) / 2.0
+			(delta1 - 1.0) * symm_mat_sum(ln_diss_mat, &clust_k, &clust_k) / 2.0
 				- num_pairs_k * lgamma_delta1
 				+ alpha_beta_ratio
 				+ ln_gamma(a)
@@ -102,16 +87,22 @@ pub fn ln_likelihood(data: &MCMCData, state: &MCMCState, params: &PriorHyperPara
 	let lik_repulsive = (0..n_clusts)
 		.into_par_iter()
 		.map(|k| {
-			let clust_k = findall(clust_labels, |x| *x == clust_list[k]);
+			let clust_k = clust_labels
+				.iter()
+				.positions(|x| *x == clust_list[k])
+				.collect_vec();
 			let sz_k = clust_k.len();
 			(k + 1..n_clusts)
 				.map(|t| {
-					let clust_t = findall(clust_labels, |x| *x == clust_list[t]);
+					let clust_t = clust_labels
+						.iter()
+						.positions(|x| *x == clust_list[t])
+						.collect_vec();
 					let sz_t = clust_t.len();
 					let num_pairs_kt = (sz_k * sz_t) as f64;
 					let z = zeta + delta2 * num_pairs_kt;
 					let g = gamma + symm_mat_sum(diss_mat, &clust_k, &clust_t);
-					(delta2 - 1.0) * symm_mat_sum(log_diss_mat, &clust_k, &clust_t)
+					(delta2 - 1.0) * symm_mat_sum(ln_diss_mat, &clust_k, &clust_t)
 						- num_pairs_kt * lgamma_delta2
 						+ zeta_gamma_ratio + ln_gamma(z)
 						- z * g.ln()
@@ -124,17 +115,16 @@ pub fn ln_likelihood(data: &MCMCData, state: &MCMCState, params: &PriorHyperPara
 }
 
 /// Log-prior of the clustering, which depends only on the cluster sizes.
-#[pyfunction]
 pub fn ln_prior(state: &MCMCState, params: &PriorHyperParams) -> f64 {
 	let n_pts = state.clust_labels.len() as f64;
 	let clust_sizes = &state.clust_sizes;
 	let n_clusts = state.n_clusts().get() as f64;
 	let r = state.r;
 	let p = state.p;
-	let eta = params.eta;
-	let sigma = params.sigma;
-	let u = params.u;
-	let v = params.v;
+	let eta = params.eta();
+	let sigma = params.sigma();
+	let u = params.u();
+	let v = params.v();
 
 	ln_gamma(n_clusts + 1.0) + (n_pts - n_clusts) * p.ln() + (r * n_clusts) * (1.0 - p).ln()
 		- n_clusts * ln_gamma(r)
@@ -150,16 +140,39 @@ pub fn ln_prior(state: &MCMCState, params: &PriorHyperParams) -> f64 {
 			.sum::<f64>()
 }
 
-pub unsafe fn run_sampler(
+pub fn run_sampler<R: Rng>(
 	data: &MCMCData,
 	options: &MCMCOptions,
-	init_state: MCMCState,
+	init_state: &mut MCMCState,
 	params: &PriorHyperParams,
-	rng: &mut SmallRng,
-) -> MCMCResult {
-	let mut state = init_state;
+	rng: &mut R,
+) -> Result<MCMCResult> {
+	let state = init_state;
 	let n_samples = options.n_samples();
 	let n_pts = data.n_pts().get();
+	if params.n_clusts_range().start().get() > n_pts {
+		return Err(anyhow!(
+			"Parameter n_clusts_min ({}) is greater than number of points ({})",
+			params.n_clusts_range().start().get(),
+			n_pts
+		));
+	}
+	if state.clust_labels().len() == n_pts {
+		return Err(anyhow!(
+			"Invalid initial state: found {} cluster labels, but the data has {} points",
+			state.clust_labels().len(),
+			n_pts
+		));
+	}
+	if !params.n_clusts_range().contains(&state.n_clusts()) {
+		return Err(anyhow!(
+			"Initial state has {} clusters, which is incompatible with the parameters given where \
+			 the number of clusters must be in [{} and {}]",
+			state.n_clusts(),
+			params.n_clusts_range().start().get(),
+			params.n_clusts_range().end().get()
+		));
+	}
 	let mut result = MCMCResult {
 		clusts: vec![Vec::with_capacity(n_pts); n_samples],
 		posterior_coclustering: Array2Wrapper(Array2::zeros((n_pts, n_pts))),
@@ -191,29 +204,29 @@ pub unsafe fn run_sampler(
 		ln_lik: Vec::with_capacity(n_samples),
 		ln_posterior: Vec::with_capacity(n_samples),
 		options: *options,
-		params: *params,
+		params: params.clone(),
 	};
 	if n_samples != 0 {
 		let start_time = Instant::now();
 		for _ in 0..options.n_burnin {
 			state
-				.sample_r_conditional(params, rng)
-				.sample_p_conditional(params, rng);
+				.sample_r_conditional(params, rng)?
+				.sample_p_conditional(params, rng)?;
 		}
 		let mut j = 0;
 		for i in options.n_burnin..options.n_iter {
 			state
-				.sample_r_conditional(params, rng)
-				.sample_p_conditional(params, rng)
-				.sample_clusters_gibbs(data, params, rng);
+				.sample_r_conditional(params, rng)?
+				.sample_p_conditional(params, rng)?
+				.sample_clusters_gibbs(data, params, rng)?;
 			if (i - options.n_burnin) % options.thinning == 0 {
 				result.clusts[j].extend(state.clust_labels.iter());
 				result.n_clusts[j] = state.n_clusts().get();
 				result.r[j] = state.r;
 				result.p[j] = state.p;
 				result.r_acceptances[j] = state.r_accepted;
-				result.ln_lik[j] = ln_likelihood(data, &state, params);
-				result.ln_posterior[j] = result.ln_lik[j] + ln_prior(&state, params);
+				result.ln_lik[j] = ln_likelihood(data, state, params);
+				result.ln_posterior[j] = result.ln_lik[j] + ln_prior(state, params);
 				j += 1;
 			}
 		}
@@ -244,4 +257,16 @@ pub unsafe fn run_sampler(
 		) = aux_stats(&Array1::from_iter(result.p.iter().copied()));
 	}
 	todo!();
+}
+
+#[pyfunction]
+#[pyo3(name = "run_sampler")]
+pub(crate) fn py_run_sampler(
+	data: &MCMCData,
+	options: &MCMCOptions,
+	init_state: &mut MCMCState,
+	params: &PriorHyperParams,
+) -> Result<MCMCResult> {
+	let mut rng = SmallRng::from_entropy();
+	run_sampler(data, options, init_state, params, &mut rng)
 }

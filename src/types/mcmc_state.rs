@@ -10,6 +10,8 @@ use itertools::Itertools;
 use pyo3::prelude::*;
 
 use crate::types::ClusterLabel;
+const DEFAULT_R: f64 = 1.0;
+const DEFAULT_P: f64 = 0.5;
 
 /// Current state of the MCMC sampler.
 #[derive(Debug, Clone, Accessors, PartialEq)]
@@ -43,7 +45,7 @@ impl MCMCState {
 	/// Set the parameter r. Useful to initialize a custom state when starting
 	/// the MCMC sampler.
 	pub fn set_r(&mut self, r: f64) -> Result<&mut Self> {
-		if r <= 0.0 || r.is_infinite() {
+		if !(0.0..f64::INFINITY).contains(&r) {
 			return Err(anyhow!("r must be in the interval [0, ∞)]"));
 		}
 		self.r = r;
@@ -75,7 +77,7 @@ impl MCMCState {
 			));
 		}
 		if *clusts.iter().max().unwrap() as usize >= n_pts {
-			return Err(anyhow!("Cluster labels must be in the range [0, n_pts)"));
+			return Err(anyhow!("Cluster labels must be in the range [0, n) where n is the number of points"));
 		}
 		self.clust_labels = clusts;
 		self.clust_sizes = vec![0; self.clust_labels.len()];
@@ -94,11 +96,12 @@ impl MCMCState {
 #[pymethods]
 impl MCMCState {
 	#[new]
+	#[pyo3(signature = (clusts, r = DEFAULT_R, p = DEFAULT_P))]
 	pub fn new(clusts: Vec<ClusterLabel>, r: f64, p: f64) -> Result<Self> {
 		let mut res = MCMCState {
 			clust_labels: Vec::new(),
-			r: 1.0,
-			p: 0.5,
+			r: DEFAULT_R,
+			p: DEFAULT_P,
 			r_accepted: true,
 			clust_sizes: Vec::new(),
 			clust_list: BTreeSet::new(),

@@ -14,3 +14,9 @@ dynamic = ["version"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.7.5",
+    "pyqt6>=6.7.1",
+]

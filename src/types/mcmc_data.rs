@@ -3,7 +3,6 @@ use std::{
 	num::NonZeroUsize,
 };
 
-use accessory::Accessors;
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2, Zip};
 use ndarray_linalg::Norm;
@@ -14,30 +13,45 @@ use super::ClusterLabel;
 use crate::types::Array2Wrapper;
 
 /// Struct to hold the dissimilarities matrix.
-#[derive(Debug, Clone, Accessors, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 #[pyclass(str)]
 pub struct MCMCData {
 	/// Dissimlarities matrix.
-	pub(crate) diss_mat: Array2Wrapper<f64>,
+	diss_mat: Array2Wrapper<f64>,
 
 	/// Element-wise log of the dissimilarities matrix.
-	pub(crate) ln_diss_mat: Array2Wrapper<f64>,
+	ln_diss_mat: Array2Wrapper<f64>,
 }
 
 impl MCMCData {
-	/// Check whether a matrix is nonempty, and has symmetric non-negative
-	/// entries that are zero on the diagonal.
+	/// Check whether the dissimilarity matrix is non-empty, square, and that
+	/// the dissimilarities are symmetric positive-definite.
 	fn validate_diss_mat(diss_mat: Array2<f64>) -> Result<Array2<f64>> {
-		if diss_mat.nrows() != diss_mat.ncols() // not square
-			|| diss_mat.is_empty() // empty
-			|| Zip::from(&diss_mat).any(|&x| x < 0.0)
-			|| Zip::from(&diss_mat.diag()).any(|&x| x != 0.0)
-			|| Zip::from(&diss_mat).and(&diss_mat.t()).any(|&x, &y| x != y)
-		{
+		if diss_mat.is_empty() {
+			// empty
+			return Err(anyhow!("Dissimilarity matrix must be non-empty."));
+		}
+		if diss_mat.nrows() != diss_mat.ncols() {
+			// not square
 			return Err(anyhow!(
-				"Dissimilarities must be non-empty, and symmetric with nonnegative entries and \
-				 zero diagonal."
+				"Dissimilarity matrix must be square, but found shape {}x{}",
+				diss_mat.nrows(),
+				diss_mat.ncols()
 			));
+		}
+		if Zip::from(&diss_mat).and(&diss_mat.t()).any(|&x, &y| x != y) {
+			return Err(anyhow!("Dissimilarity matrix must be symmetric."));
+		}
+		if Zip::from(&diss_mat).any(|&x| x.is_nan()) {
+			return Err(anyhow!("Found NaN in the dissimilarity matrix."));
+		}
+		if Zip::from(&diss_mat.diag()).any(|&x| x != 0.0) {
+			return Err(anyhow!(
+				"Dissimilarity matrix must have zeros along the diagonal."
+			));
+		}
+		if diss_mat.iter().any(|x| *x <= 0.0) {
+			return Err(anyhow!("Off-diagonal entries must be strictly positive."));
 		}
 		Ok(diss_mat)
 	}
@@ -47,12 +61,15 @@ impl MCMCData {
 	/// entries that are zero on the diagonal.
 	pub fn from_diss_mat(diss_mat: Array2<f64>) -> Result<Self> {
 		Self::validate_diss_mat(diss_mat)
-			.map(|diss_mat| {
+			.and_then(|diss_mat| {
 				let ln_diss_mat = diss_mat.mapv(|x| x.ln());
-				MCMCData {
+				if ln_diss_mat.iter().any(|x| x.is_nan()) {
+					return Err(anyhow!("Found NaN in the log of the dissimilarity matrix."));
+				}
+				Ok(MCMCData {
 					diss_mat: Array2Wrapper(diss_mat),
 					ln_diss_mat: Array2Wrapper(ln_diss_mat),
-				}
+				})
 			})
 			.map_err(|e| anyhow!("Error initialising MCMCData: {}", e))
 	}
@@ -62,6 +79,9 @@ impl MCMCData {
 	/// shape (n_pts, n_dims).
 	pub fn from_points(points: Array2<f64>) -> Result<Self> {
 		let n_pts = points.nrows();
+		if Zip::from(&points).any(|&x| x.is_nan()) {
+			return Err(anyhow!("Found NaN entry in the points matrix."));
+		}
 		if n_pts == 0 {
 			return Err(anyhow!("Point cloud cannot be empty"));
 		}
@@ -76,29 +96,16 @@ impl MCMCData {
 			});
 			&temp + &temp.t()
 		};
-
-		let ln_diss_mat = diss_mat.mapv(|x| x.ln());
-		Ok(MCMCData {
-			diss_mat: Array2Wrapper(diss_mat),
-			ln_diss_mat: Array2Wrapper(ln_diss_mat),
-		})
-	}
-
-	/// Update the dissimilarities matrix. The new matrix must be non-empty,
-	/// symmetric, with non-negative entries that are zero on the diagonal.
-	pub fn set_diss_mat(&mut self, diss_mat: Array2<f64>) -> Result<&mut Self> {
-		Self::validate_diss_mat(diss_mat)
-			.map(|diss_mat| {
-				self.diss_mat = Array2Wrapper(diss_mat);
-				self.ln_diss_mat = Array2Wrapper(self.diss_mat.0.mapv(|x| x.ln()));
-				self
-			})
-			.map_err(|e| anyhow!("Error setting dissimilarities matrix: {}", e))
+		Self::from_diss_mat(diss_mat)
 	}
 
 	/// Get a reference to the dissimilarities matrix owned by this object.
 	#[inline(always)]
 	pub fn diss_mat(&self) -> &Array2<f64> { &self.diss_mat.0 }
+
+	/// Get a reference to the log-dissimilarities matrix owned by this object.
+	#[inline(always)]
+	pub(crate) fn ln_diss_mat(&self) -> &Array2<f64> { &self.ln_diss_mat.0 }
 
 	/// Number of points in the data.
 	#[inline(always)]
@@ -178,13 +185,6 @@ impl MCMCData {
 		Self::from_points(points.to_owned_array())
 	}
 
-	/// Update the dissimilarities matrix. The new matrix must be non-empty,
-	/// symmetric, with non-negative entries that are zero on the diagonal.
-	#[setter(diss_mat)]
-	fn py_set_diss_mat(&mut self, diss_mat: Bound<'_, PyArray2<f64>>) -> Result<()> {
-		self.set_diss_mat(diss_mat.to_owned_array()).map(|_| ())
-	}
-
 	/// Get a copy of the dissimilarities matrix.
 	#[getter(diss_mat)]
 	fn py_get_dist_mat(this: Bound<'_, Self>) -> Bound<'_, PyArray2<f64>> {
@@ -217,8 +217,8 @@ impl MCMCData {
 
 	fn __repr__(&self) -> String {
 		format!(
-			"MCMCData(dis_mat={:#?}, ln_dis_mat={:#?})",
-			self.diss_mat.0, self.ln_diss_mat.0
+			"MCMCData(diss_mat={:#?})",
+			self.diss_mat.0
 		)
 	}
 }
@@ -227,8 +227,8 @@ impl Display for MCMCData {
 	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
 		write!(
 			f,
-			"MCMCData {{\ndis_mat:\n{}\nln_dis_mat:\n{}\n}}",
-			self.diss_mat, self.ln_diss_mat
+			"MCMCData {{\ndiss_mat:\n{}\n}}",
+			self.diss_mat
 		)
 	}
 }
