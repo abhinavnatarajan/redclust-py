@@ -77,7 +77,9 @@ impl MCMCState {
 			));
 		}
 		if *clusts.iter().max().unwrap() as usize >= n_pts {
-			return Err(anyhow!("Cluster labels must be in the range [0, n) where n is the number of points"));
+			return Err(anyhow!(
+				"Cluster labels must be in the range [0, n) where n is the number of points"
+			));
 		}
 		self.clust_labels = clusts;
 		self.clust_sizes = vec![0; self.clust_labels.len()];
@@ -137,7 +139,7 @@ impl MCMCState {
 	/// Number of clusters.
 	#[inline(always)]
 	pub fn n_clusts(&self) -> NonZeroUsize {
-		unsafe { NonZeroUsize::new_unchecked(self.clust_list.len()) }
+		NonZeroUsize::new(self.clust_list.len()).unwrap()
 	}
 }
 

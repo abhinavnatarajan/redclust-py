@@ -11,14 +11,14 @@ use itertools::Itertools;
 use ndarray::{Array1, Array2, s};
 use numpy::PyArray1;
 use pyo3::{prelude::*, types::PyDict};
-use rand::{Rng, SeedableRng, distributions::Distribution, rngs::SmallRng};
+use rand::{Rng, distributions::Distribution};
 use statrs::{
 	distribution::{Beta, Gamma, NegativeBinomial},
 	function::beta::ln_beta,
 };
 
 use super::{ClusterLabel, MCMCData, MCMCOptions, MCMCState};
-use crate::utils::{fit_beta_mle, fit_gamma_mle, knee_pos, pmf, sample_from_ln_probs};
+use crate::utils::{fit_beta_mle, fit_gamma_mle, get_rng, knee_pos, pmf, sample_from_ln_probs};
 
 const DEFAULT_DELTA1: f64 = 1.0;
 const DEFAULT_DELTA2: f64 = 1.0;
@@ -378,8 +378,6 @@ impl PriorHyperParams {
 		// method: PriorClusteringMethod,
 		rng: &mut R,
 	) -> Result<MCMCState> {
-		// We can use unsafe here because we enforce that MCMCData never has an empty
-		// dissimilarity matrix.
 		let n_pts = data.n_pts().get();
 		let n_clusts_min = self.n_clusts_range.start().get();
 		let n_clusts_max = self.n_clusts_range.end().get();
@@ -480,11 +478,7 @@ impl PriorHyperParams {
 		// on the number of clusters.
 		let n_clusts_prior = pmf(
 			&self
-				.sample_n_clusts(
-					unsafe { NonZeroUsize::new_unchecked(n_pts) },
-					mcmc_iters_n_clusts,
-					rng,
-				)
+				.sample_n_clusts(NonZeroUsize::new(n_pts).unwrap(), mcmc_iters_n_clusts, rng)
 				.map_err(|e| anyhow!("Error when computing pmf of n_clusters: {}", e))?,
 			n_clusts_max,
 		);
@@ -653,17 +647,25 @@ impl PriorHyperParams {
 
 	/// Sample r from its prior.
 	#[pyo3(name = "sample_r")]
-	fn py_sample_r(this: Bound<'_, Self>, n_samples: usize) -> Result<Bound<'_, PyArray1<f64>>> {
-		let mut rng = SmallRng::from_entropy();
+	fn py_sample_r(
+		this: Bound<'_, Self>,
+		n_samples: usize,
+		rng_seed: Option<u64>,
+	) -> Bound<'_, PyArray1<f64>> {
+		let mut rng = get_rng(rng_seed);
 		let samples = this.borrow().sample_r(n_samples, &mut rng);
 		let arr = PyArray1::from_vec(this.py(), samples);
-		Ok(arr)
+		arr
 	}
 
 	/// Sample p from its prior.
 	#[pyo3(name = "sample_p")]
-	fn py_sample_p(this: Bound<'_, Self>, n_samples: usize) -> Bound<'_, PyArray1<f64>> {
-		let mut rng = SmallRng::from_entropy();
+	fn py_sample_p(
+		this: Bound<'_, Self>,
+		n_samples: usize,
+		rng_seed: Option<u64>,
+	) -> Bound<'_, PyArray1<f64>> {
+		let mut rng = get_rng(rng_seed);
 		let samples = this.borrow().sample_p(n_samples, &mut rng);
 		let arr = PyArray1::from_vec(this.py(), samples);
 		arr
@@ -674,8 +676,9 @@ impl PriorHyperParams {
 	fn py_sample_cluster_sizes(
 		this: Bound<'_, Self>,
 		n_samples: usize,
+		rng_seed: Option<u64>,
 	) -> Bound<'_, PyArray1<usize>> {
-		let mut rng = SmallRng::from_entropy();
+		let mut rng = get_rng(rng_seed);
 		let samples = this.borrow().sample_cluster_sizes(n_samples, &mut rng);
 		let arr = PyArray1::from_vec(this.py(), samples);
 		arr
@@ -688,8 +691,9 @@ impl PriorHyperParams {
 		this: Bound<'_, Self>,
 		n_pts: NonZeroUsize,
 		n_samples: NonZeroUsize,
+		rng_seed: Option<u64>,
 	) -> PyResult<Bound<'_, PyArray1<usize>>> {
-		let mut rng = SmallRng::from_entropy();
+		let mut rng = get_rng(rng_seed);
 		let samples = this.borrow().sample_n_clusts(n_pts, n_samples, &mut rng)?;
 		let arr = PyArray1::from_vec(this.py(), samples);
 		Ok(arr)
@@ -701,8 +705,9 @@ impl PriorHyperParams {
 	fn py_sample_within_cluster_dists(
 		this: Bound<'_, Self>,
 		n_samples: usize,
+		rng_seed: Option<u64>,
 	) -> Bound<'_, PyArray1<f64>> {
-		let mut rng = SmallRng::from_entropy();
+		let mut rng = get_rng(rng_seed);
 		let samples = this
 			.borrow()
 			.sample_within_cluster_dists(n_samples, &mut rng);
@@ -716,8 +721,9 @@ impl PriorHyperParams {
 	fn py_sample_inter_cluster_dists(
 		this: Bound<'_, Self>,
 		n_samples: usize,
+		rng_seed: Option<u64>,
 	) -> Bound<'_, PyArray1<f64>> {
-		let mut rng = SmallRng::from_entropy();
+		let mut rng = get_rng(rng_seed);
 		let samples = this
 			.borrow()
 			.sample_inter_cluster_dists(n_samples, &mut rng);
@@ -735,6 +741,7 @@ impl PriorHyperParams {
 			mcmc_iters_rp=DEFAULT_MCMC_ITERS_RP_FITPRIOR,
 			mle_iters=DEFAULT_MLE_ITERS_FITPRIOR,
 			mcmc_iters_n_clusts=DEFAULT_MCMC_ITERS_N_CLUSTS_FITPRIOR,
+			rng_seed=None,
 			)
 		)]
 	fn py_fit_from_data(
@@ -743,13 +750,15 @@ impl PriorHyperParams {
 		mcmc_iters_rp: NonZeroUsize,
 		mle_iters: NonZeroUsize,
 		mcmc_iters_n_clusts: NonZeroUsize,
+		rng_seed: Option<u64>,
 	) -> Result<MCMCState> {
+		let mut rng = get_rng(rng_seed);
 		self.fit_from_data(
 			data,
 			mcmc_iters_rp,
 			mle_iters,
 			mcmc_iters_n_clusts,
-			&mut SmallRng::from_entropy(),
+			&mut rng,
 		)
 	}
 

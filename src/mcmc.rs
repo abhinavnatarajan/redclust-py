@@ -1,10 +1,10 @@
-use std::time::Instant;
+use std::{thread, time::Instant};
 
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
-use ndarray::{Array1, Array2, s};
+use ndarray::{Array1, s};
 use pyo3::prelude::*;
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::Rng;
 use rayon::prelude::*;
 use statrs::{
 	distribution::{Beta, Continuous, Gamma},
@@ -14,8 +14,8 @@ use statrs::{
 use crate::{
 	MCMCOptions,
 	MCMCResult,
-	types::{Array2Wrapper, MCMCData, MCMCState, PriorHyperParams},
-	utils::{num_pairs, symm_mat_sum},
+	types::{MCMCData, MCMCState, PriorHyperParams},
+	utils::{get_rng, num_pairs, symm_mat_sum},
 };
 
 // Mean, variance, autocorrelation function, integrated autocorrelation time,
@@ -140,74 +140,18 @@ pub fn ln_prior(state: &MCMCState, params: &PriorHyperParams) -> f64 {
 			.sum::<f64>()
 }
 
-pub fn run_sampler<R: Rng>(
+fn run_chain<R: Rng>(
 	data: &MCMCData,
-	options: &MCMCOptions,
-	init_state: &mut MCMCState,
 	params: &PriorHyperParams,
+	init_state: &MCMCState,
+	options: &MCMCOptions,
 	rng: &mut R,
 ) -> Result<MCMCResult> {
-	let state = init_state;
+	let mut state = init_state.clone();
 	let n_samples = options.n_samples();
 	let n_pts = data.n_pts().get();
-	if params.n_clusts_range().start().get() > n_pts {
-		return Err(anyhow!(
-			"Parameter n_clusts_min ({}) is greater than number of points ({})",
-			params.n_clusts_range().start().get(),
-			n_pts
-		));
-	}
-	if state.clust_labels().len() == n_pts {
-		return Err(anyhow!(
-			"Invalid initial state: found {} cluster labels, but the data has {} points",
-			state.clust_labels().len(),
-			n_pts
-		));
-	}
-	if !params.n_clusts_range().contains(&state.n_clusts()) {
-		return Err(anyhow!(
-			"Initial state has {} clusters, which is incompatible with the parameters given where \
-			 the number of clusters must be in [{} and {}]",
-			state.n_clusts(),
-			params.n_clusts_range().start().get(),
-			params.n_clusts_range().end().get()
-		));
-	}
-	let mut result = MCMCResult {
-		clusts: vec![Vec::with_capacity(n_pts); n_samples],
-		posterior_coclustering: Array2Wrapper(Array2::zeros((n_pts, n_pts))),
-		n_clusts: vec![0; n_samples],
-		n_clusts_ess: 0.0,
-		n_clusts_acf: Vec::with_capacity(n_samples),
-		n_clusts_iac: 0.0,
-		n_clusts_mean: 0.0,
-		n_clusts_variance: 0.0,
-		r: Vec::with_capacity(n_samples),
-		r_ess: 0.0,
-		r_acf: Vec::with_capacity(n_samples),
-		r_iac: 0.0,
-		r_mean: 0.0,
-		r_variance: 0.0,
-		p: Vec::with_capacity(n_samples),
-		p_ess: 0.0,
-		p_acf: Vec::with_capacity(n_samples),
-		p_iac: 0.0,
-		p_mean: 0.0,
-		p_variance: 0.0,
-		splitmerge_acceptances: Vec::with_capacity(n_samples), // todo
-		splitmerge_acceptance_rate: 0.0,                       // todo
-		splitmerge_splits: Vec::with_capacity(n_samples),      // todo
-		r_acceptances: Vec::with_capacity(n_samples),
-		r_acceptance_rate: 0.0,
-		runtime: 0.0,
-		mean_iter_time: 0.0,
-		ln_lik: Vec::with_capacity(n_samples),
-		ln_posterior: Vec::with_capacity(n_samples),
-		options: *options,
-		params: params.clone(),
-	};
+	let mut result = MCMCResult::with_capacity(n_pts, n_samples);
 	if n_samples != 0 {
-		let start_time = Instant::now();
 		for _ in 0..options.n_burnin {
 			state
 				.sample_r_conditional(params, rng)?
@@ -219,44 +163,79 @@ pub fn run_sampler<R: Rng>(
 				.sample_r_conditional(params, rng)?
 				.sample_p_conditional(params, rng)?
 				.sample_clusters_gibbs(data, params, rng)?;
+			if state.r_accepted {
+				result.r_acceptance_rate += 1.0;
+			}
 			if (i - options.n_burnin) % options.thinning == 0 {
 				result.clusts[j].extend(state.clust_labels.iter());
 				result.n_clusts[j] = state.n_clusts().get();
 				result.r[j] = state.r;
 				result.p[j] = state.p;
-				result.r_acceptances[j] = state.r_accepted;
-				result.ln_lik[j] = ln_likelihood(data, state, params);
-				result.ln_posterior[j] = result.ln_lik[j] + ln_prior(state, params);
+				result.ln_lik[j] = ln_likelihood(data, &state, params);
+				result.ln_posterior[j] = result.ln_lik[j] + ln_prior(&state, params);
 				j += 1;
 			}
 		}
-		result.runtime = start_time.elapsed().as_secs_f64();
-		result.mean_iter_time = result.runtime / options.n_iter as f64;
-		(
-			result.n_clusts_mean,
-			result.n_clusts_variance,
-			result.n_clusts_acf,
-			result.n_clusts_iac,
-			result.n_clusts_ess,
-		) = aux_stats(&Array1::from_iter(
-			result.n_clusts.iter().map(|x| *x as f64),
-		));
-		(
-			result.r_mean,
-			result.r_variance,
-			result.r_acf,
-			result.r_iac,
-			result.r_ess,
-		) = aux_stats(&Array1::from_iter(result.r.iter().copied()));
-		(
-			result.p_mean,
-			result.p_variance,
-			result.p_acf,
-			result.p_iac,
-			result.p_ess,
-		) = aux_stats(&Array1::from_iter(result.p.iter().copied()));
+		result.r_acceptance_rate /= options.n_iter as f64;
 	}
-	todo!();
+	Ok(result)
+}
+
+pub fn run_sampler(
+	data: &MCMCData,
+	params: &PriorHyperParams,
+	init_state: &MCMCState,
+	options: &MCMCOptions,
+) -> Result<MCMCResult> {
+	// Check that data and params are compatible
+	if data.n_pts() < *params.n_clusts_range().start() {
+		return Err(anyhow!(
+			"Parameter n_clusts_range starts at {} which is greater than the number of points ({})",
+			params.n_clusts_range().start(),
+			data.n_pts()
+		));
+	}
+	// Check that data and init_state are compatible
+	if init_state.clust_labels().len() != data.n_pts().get() {
+		return Err(anyhow!(
+			"Invalid initial state: found {} cluster labels, but the data has {} points",
+			init_state.clust_labels().len(),
+			data.n_pts()
+		));
+	}
+	// Check that params and init_state are compatible
+	if !params.n_clusts_range().contains(&init_state.n_clusts()) {
+		return Err(anyhow!(
+			"Initial state has {} clusters, which is incompatible with the parameters given where \
+			 the number of clusters must be in [{} and {}]",
+			init_state.n_clusts(),
+			params.n_clusts_range().start().get(),
+			params.n_clusts_range().end().get()
+		));
+	}
+	let mut rng = get_rng(options.rng_seed);
+	let results_vec = thread::scope(|s| {
+		(0..options.n_chains.get())
+			.map(|_| {
+				rng.jump();
+				let mut thread_rng = rng.clone();
+				s.spawn(move || run_chain(data, params, init_state, options, &mut thread_rng))
+			})
+			.map(|handle| handle.join().unwrap())
+			.collect::<Vec<_>>()
+	});
+
+	{
+		if results_vec.iter().all(|x| x.is_err()) {
+			Err(anyhow!("All chains failed."))
+		} else {
+			Ok(results_vec
+				.into_iter()
+				.filter_map(|x| x.ok())
+				.reduce(|acc, x| acc.merge_with(x))
+				.unwrap())
+		}
+	}
 }
 
 #[pyfunction]
@@ -267,6 +246,5 @@ pub(crate) fn py_run_sampler(
 	init_state: &mut MCMCState,
 	params: &PriorHyperParams,
 ) -> Result<MCMCResult> {
-	let mut rng = SmallRng::from_entropy();
-	run_sampler(data, options, init_state, params, &mut rng)
+	run_sampler(data, params, init_state, options)
 }

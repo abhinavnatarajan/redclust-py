@@ -6,33 +6,46 @@ use ndarray::{Array1, Array2, ArrayView1};
 use ndarray_linalg::SolveH;
 use num_traits::identities::Zero;
 use numpy::array;
-use rand::{Rng, prelude::Distribution};
+use rand::{
+	Rng,
+	RngCore,
+	SeedableRng,
+	distributions::{Distribution, Uniform},
+	rngs::OsRng,
+};
+use rand_xoshiro::Xoshiro256PlusPlus;
 use special::Gamma;
-use statrs::distribution::Uniform;
 
-pub unsafe fn row_sum(mat: &Array2<f64>, row: usize, cols: &[usize]) -> f64 {
-	cols.iter().map(|&j| mat.uget((row, j))).sum()
+/// Sum of the elements in a row of a matrix, given the row index and the column
+/// indices to sum over.
+/// Panics if the row index or any of the column indices are out of bounds.
+pub fn row_sum(mat: &Array2<f64>, row: usize, cols: &[usize]) -> f64 {
+	cols.iter().map(|&j| mat[(row, j)]).sum()
 }
 
-/// Sample from log-probability vector. Will return an error if the
+pub fn get_rng(rng_seed: Option<u64>) -> Xoshiro256PlusPlus {
+	let seed = rng_seed.unwrap_or_else(|| OsRng.next_u64());
+	Xoshiro256PlusPlus::seed_from_u64(seed)
+}
+
+/// Sample from discrete distribution, in the form of a vector of
+/// log-probabilities, using the Gumbel-max trick. Will return an error if the
 /// vector contains any NaNs.
 pub fn sample_from_ln_probs<R: Rng>(p: &ArrayView1<f64>, rng: &mut R) -> Result<usize> {
 	let p = p - p.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+	let u = Uniform::from(0.0..=1.0)
+		.sample_iter(rng)
+		.take(p.len())
+		.collect::<Array1<_>>();
 	unsafe {
-		let u = Uniform::new(0.0, 1.0)
-			// obviously safe
-			.unwrap_unchecked()
-			.sample_iter(rng)
-			.take(p.len())
-			.collect::<Array1<_>>();
-		Ok(float_vec_max(
+		float_vec_max(
 			(-(-(u.ln())).ln() + p)
 				.as_slice()
 				// safe to unwrap if p is contiguous or in standard order, which
 				// we guarantee because we create p in this function
 				.unwrap_unchecked(),
-		)? // if the probability vector contains any NaNs, we want to catch it here
-		.0)
+		)
+		.map(|(idx, _val)| idx)
 	}
 }
 
@@ -43,7 +56,9 @@ pub fn num_pairs(n: u64) -> u64 {
 	n * (n - 1) / 2
 }
 
-pub fn symm_mat_sum<T: Clone + AddAssign + Zero>(
+/// Sum of a submatrix in a symmetric matrix, spanned by the given row and
+/// column indices.
+pub fn symm_mat_sum<T: Copy + AddAssign + Zero>(
 	mat: &Array2<T>,
 	rows: &[usize],
 	cols: &[usize],
@@ -51,12 +66,13 @@ pub fn symm_mat_sum<T: Clone + AddAssign + Zero>(
 	let mut sum = T::zero();
 	for row in rows {
 		for col in cols {
-			sum += mat[(*row, *col)].clone();
+			sum += mat[(*row, *col)];
 		}
 	}
 	sum
 }
 
+/// Find the index and value of the maximum element in a vector of f64 values.
 pub fn float_vec_max(v: &[f64]) -> Result<(usize, f64)> {
 	if v.is_empty() {
 		return Err(anyhow!("Empty vector"));
@@ -67,6 +83,7 @@ pub fn float_vec_max(v: &[f64]) -> Result<(usize, f64)> {
 	Ok(float_vec_max_unchecked(v))
 }
 
+/// Same as float_vec_max, but does not check for NaN or empty vector.
 pub fn float_vec_max_unchecked(v: &[f64]) -> (usize, f64) {
 	v.iter()
 		.enumerate()
@@ -105,12 +122,16 @@ fn backward_diffs(v: &[f64]) -> Vec<f64> {
 	diffs
 }
 
+/// Find the index of the knee point in a vector of f64 values.
+/// The knee point is defined as the point where the second derivative
+/// is maximized, which is approximated by the maximum of the
+/// backward differences of the forward differences.
 pub fn knee_pos(vals: &[f64]) -> Result<usize> {
 	if vals.is_empty() {
 		return Err(anyhow!("Input vector is empty"));
 	}
 	let second_der = backward_diffs(&forward_diffs(vals));
-	Ok(float_vec_max(&second_der)?.0)
+	float_vec_max(&second_der).map(|(index, _value)| index)
 }
 
 pub fn fit_gamma_mle(
@@ -146,6 +167,9 @@ pub fn fit_gamma_mle(
 	}
 	if iter == max_iter {
 		return Err(anyhow!("MLE failed to converge!"));
+	}
+	if a.is_nan() || a <= 0.0 {
+		return Err(anyhow!("Numerical instability in the MLE, got {a:?}."));
 	}
 	Ok((a, mx / a))
 }
@@ -183,6 +207,13 @@ pub fn fit_beta_mle(x: &Array1<f64>, max_iter: usize, tol: Option<f64>) -> Resul
 	}
 	if iter == max_iter {
 		return Err(anyhow!("MLE failed to converge!"));
+	}
+	if theta.iter().any(|&x| x.is_nan() || x <= 0.0) {
+		return Err(anyhow!(
+			"Numerical instability in the MLE, got ({:?}, {:?}).",
+			theta[0],
+			theta[1]
+		));
 	}
 	Ok((theta[0], theta[1]))
 }

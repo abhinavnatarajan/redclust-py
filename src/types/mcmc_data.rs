@@ -109,9 +109,7 @@ impl MCMCData {
 
 	/// Number of points in the data.
 	#[inline(always)]
-	pub fn n_pts(&self) -> NonZeroUsize {
-		unsafe { NonZeroUsize::new_unchecked(self.diss_mat.0.nrows()) }
-	}
+	pub fn n_pts(&self) -> NonZeroUsize { NonZeroUsize::new(self.diss_mat.0.nrows()).unwrap() }
 
 	/// Given cluster labels, return the set of all within-cluster
 	/// dissimilarities.
@@ -215,20 +213,11 @@ impl MCMCData {
 			.map(|arr| PyArray1::from_owned_array(this.py(), arr))
 	}
 
-	fn __repr__(&self) -> String {
-		format!(
-			"MCMCData(diss_mat={:#?})",
-			self.diss_mat.0
-		)
-	}
+	fn __repr__(&self) -> String { format!("MCMCData(diss_mat={:#?})", self.diss_mat.0) }
 }
 
 impl Display for MCMCData {
 	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-		write!(
-			f,
-			"MCMCData {{\ndiss_mat:\n{}\n}}",
-			self.diss_mat
-		)
+		write!(f, "MCMCData {{\ndiss_mat:\n{}\n}}", self.diss_mat)
 	}
 }

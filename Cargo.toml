@@ -23,7 +23,8 @@ pyo3 = { version = "0.24.0", features = [
 	"anyhow",
 	"multiple-pymethods",
 ] }
-rand = { version = "0.8.5", features = ["small_rng"] }
+rand = { version = "0.8.0" }
+rand_xoshiro = "0.6.0"
 rayon = "1.10.0"
 special = "0.11.4"
 statrs = { version = "0.18.0", default-features = false, features = ["rand"] }

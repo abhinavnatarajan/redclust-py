@@ -1,18 +1,19 @@
 use std::{
-	collections::HashMap,
 	fmt::{Debug, Display, Formatter},
 	num::NonZeroUsize,
 };
 
 use accessory::Accessors;
 use anyhow::{Result, anyhow};
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyDict};
 
 const DEFAULT_N_ITER: usize = 1000;
 const DEFAULT_N_BURNIN: usize = 200;
-const DEFAULT_THINNING: usize = 1;
+const DEFAULT_THINNING: NonZeroUsize = NonZeroUsize::new(1).unwrap();
 const DEFAULT_N_GIBBS: usize = 5;
 const DEFAULT_N_MH: usize = 1;
+const DEFAULT_N_CHAINS: NonZeroUsize = NonZeroUsize::new(1).unwrap();
+const DEFAULT_RNG_SEED: Option<u64> = None;
 
 /// Options for the MCMC algorithm.
 #[derive(Debug, Clone, Copy, Accessors, PartialEq, Eq)]
@@ -37,6 +38,14 @@ pub struct MCMCOptions {
 	/// Number of Metropolis-Hastings steps per iteration.
 	#[access(get)]
 	pub(crate) n_mh: usize,
+
+	/// Number of chains to run concurrently.
+	#[pyo3(set)]
+	pub n_chains: NonZeroUsize,
+
+	/// Seed for the random number generator.
+	#[pyo3(set)]
+	pub rng_seed: Option<u64>,
 }
 
 impl MCMCOptions {
@@ -56,14 +65,14 @@ impl MCMCOptions {
 
 impl Default for MCMCOptions {
 	fn default() -> Self {
-		unsafe {
-			MCMCOptions {
-				n_iter: DEFAULT_N_ITER,
-				n_burnin: DEFAULT_N_BURNIN,
-				thinning: NonZeroUsize::new_unchecked(DEFAULT_THINNING),
-				n_gibbs: DEFAULT_N_GIBBS,
-				n_mh: DEFAULT_N_MH,
-			}
+		MCMCOptions {
+			n_iter: DEFAULT_N_ITER,
+			n_burnin: DEFAULT_N_BURNIN,
+			thinning: DEFAULT_THINNING,
+			n_gibbs: DEFAULT_N_GIBBS,
+			n_mh: DEFAULT_N_MH,
+			n_chains: DEFAULT_N_CHAINS,
+			rng_seed: DEFAULT_RNG_SEED,
 		}
 	}
 }
@@ -92,9 +101,11 @@ impl MCMCOptions {
 	#[pyo3(signature = (
 			n_iter=DEFAULT_N_ITER,
 			n_burnin=DEFAULT_N_BURNIN,
-			thinning=NonZeroUsize::new_unchecked(DEFAULT_THINNING),
+			thinning=DEFAULT_THINNING,
 			n_gibbs=DEFAULT_N_GIBBS,
-			n_mh=DEFAULT_N_MH
+			n_mh=DEFAULT_N_MH,
+			n_chains=NonZeroUsize::new(1).unwrap(),
+			rng_seed=None
 			))]
 	pub fn new(
 		n_iter: usize,
@@ -102,6 +113,8 @@ impl MCMCOptions {
 		thinning: NonZeroUsize,
 		n_gibbs: usize,
 		n_mh: usize,
+		n_chains: NonZeroUsize,
+		rng_seed: Option<u64>,
 	) -> Result<Self> {
 		let mut res = MCMCOptions {
 			n_iter,
@@ -109,6 +122,8 @@ impl MCMCOptions {
 			thinning,
 			n_gibbs: 1,
 			n_mh: 1,
+			n_chains,
+			rng_seed,
 		};
 		res.set_n_gibbs_mh(n_gibbs, n_mh)?;
 		Ok(res)
@@ -116,24 +131,23 @@ impl MCMCOptions {
 
 	fn __repr__(&self) -> String {
 		format!(
-			"MCMCOptions(n_iter={}, n_burnin={}, thinning={}, n_gibbs={}, n_mh={})",
-			self.n_iter, self.n_burnin, self.thinning, self.n_gibbs, self.n_mh
+			"MCMCOptions(n_iter={}, n_burnin={}, thinning={}, n_gibbs={}, n_mh={}, n_chains={})",
+			self.n_iter, self.n_burnin, self.thinning, self.n_gibbs, self.n_mh, self.n_chains
 		)
 	}
 
 	/// Dictionary representation of the MCMC options.
-	fn as_dict(&self) -> HashMap<String, usize> { HashMap::from(self) }
-}
-
-impl From<&MCMCOptions> for HashMap<String, usize> {
-	fn from(options: &MCMCOptions) -> Self {
-		HashMap::from([
-			("n_iter".to_string(), options.n_iter),
-			("n_burnin".to_string(), options.n_burnin),
-			("thinning".to_string(), options.thinning.get()),
-			("n_gibbs".to_string(), options.n_gibbs),
-			("n_mh".to_string(), options.n_mh),
-		])
+	fn as_dict(this: Bound<'_, Self>) -> Result<Bound<'_, PyDict>> {
+		let slf = this.borrow();
+		let dict: Bound<'_, PyDict> = PyDict::new(this.py());
+		dict.set_item("n_iter", &slf.n_iter)?;
+		dict.set_item("n_burnin", &slf.n_burnin)?;
+		dict.set_item("thinning", &slf.thinning)?;
+		dict.set_item("n_gibbs", &slf.n_gibbs)?;
+		dict.set_item("n_mh", slf.n_mh)?;
+		dict.set_item("n_chains", slf.n_chains)?;
+		dict.set_item("rng_seed", slf.rng_seed)?;
+		Ok(dict)
 	}
 }
 
@@ -141,8 +155,9 @@ impl Display for MCMCOptions {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"MCMCOptions {{ n_iter: {}, n_burnin: {}, thinning: {}, n_gibbs: {}, n_mh: {} }}",
-			self.n_iter, self.n_burnin, self.thinning, self.n_gibbs, self.n_mh
+			"MCMCOptions {{ n_iter: {}, n_burnin: {}, thinning: {}, n_gibbs: {}, n_mh: {}, \
+			 n_chains: {} }}",
+			self.n_iter, self.n_burnin, self.thinning, self.n_gibbs, self.n_mh, self.n_chains
 		)
 	}
 }
