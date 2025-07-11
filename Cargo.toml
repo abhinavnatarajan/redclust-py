@@ -1,7 +1,7 @@
 [package]
 name = "redclust"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
@@ -19,7 +19,6 @@ ndarray-linalg = "0.17.0"
 num-traits = "0.2.19"
 numpy = "0.24.0"
 pyo3 = { version = "0.24.0", features = [
-	"extension-module",
 	"anyhow",
 	"multiple-pymethods",
 ] }
@@ -30,7 +29,8 @@ special = "0.11.4"
 statrs = { version = "0.18.0", default-features = false, features = ["rand"] }
 
 [features]
-default = ["openblas-static"]
+default = ["python-module", "openblas-static"]
+python-module = ["pyo3/extension-module"]
 openblas-static = ["ndarray-linalg/openblas-static"]
 openblas-system = ["ndarray-linalg/openblas-system"]
 netlib-static = ["ndarray-linalg/netlib-static"]

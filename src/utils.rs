@@ -31,7 +31,7 @@ pub fn get_rng(rng_seed: Option<u64>) -> Xoshiro256PlusPlus {
 /// Sample from discrete distribution, in the form of a vector of
 /// log-probabilities, using the Gumbel-max trick. Will return an error if the
 /// vector contains any NaNs.
-pub fn sample_from_ln_probs<R: Rng>(p: &ArrayView1<f64>, rng: &mut R) -> Result<usize> {
+pub fn sample_from_ln_probs<R: Rng + ?Sized>(p: &ArrayView1<f64>, rng: &mut R) -> Result<usize> {
 	let p = p - p.iter().fold(f64::INFINITY, |a, &b| a.min(b));
 	let u = Uniform::from(0.0..=1.0)
 		.sample_iter(rng)

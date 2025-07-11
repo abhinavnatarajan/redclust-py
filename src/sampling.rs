@@ -7,12 +7,7 @@ use statrs::{
 	function::gamma::ln_gamma,
 };
 
-use crate::{
-	MCMCData,
-	types::{ClusterLabel, MCMCState, PriorHyperParams},
-	utils::{row_sum, sample_from_ln_probs},
-};
-
+use crate::*;
 impl MCMCState {
 	/// Sample p from its conditional posterior.
 	pub(crate) fn sample_p_conditional<R: Rng>(
@@ -20,7 +15,7 @@ impl MCMCState {
 		params: &PriorHyperParams,
 		rng: &mut R,
 	) -> Result<&mut Self> {
-		let n_clusts = self.n_clusts().get() as f64;
+		let n_clusts = self.num_clusts().get() as f64;
 		let n_pts = self.clust_labels.len() as f64;
 		self.p = Beta::new(
 			n_pts - n_clusts + params.u(),
@@ -39,7 +34,7 @@ impl MCMCState {
 		// This is called in a hot loop so we take off the safety goggles.
 		let r = self.r;
 		let p = self.p;
-		let n_clusts = self.n_clusts().get() as f64;
+		let n_clusts = self.num_clusts().get() as f64;
 		let eta = params.eta();
 		let sigma = params.sigma();
 		let proposalsd_r = params.proposalsd_r();
@@ -119,7 +114,7 @@ impl MCMCState {
 
 			// We cannot move the ith point to a different cluster if it is in a singleton
 			// cluster and we are already at the minimum number of clusters.
-			if clust_list.len() == params.n_clusts_range().start().get()
+			if clust_list.len() == params.min_num_clusts().get()
 				&& clust_sizes[*current_label as usize] == 1
 			{
 				continue;
@@ -149,10 +144,12 @@ impl MCMCState {
 				let elems_clust_k = clust_labels.iter().positions(|&x| x == k).collect_vec();
 				let sz_k = clust_sizes[k as usize] as f64;
 				let alpha_ik = params.alpha() + params.delta1() * sz_k;
-				let beta_ik = params.beta() + row_sum(data.diss_mat(), point_idx, &elems_clust_k);
+				let beta_ik =
+					params.beta() + row_sum(data.dissimilarities(), point_idx, &elems_clust_k);
 				let zeta_ik = params.zeta() + params.delta2() * sz_k;
-				let gamma_ik = params.gamma() + row_sum(data.diss_mat(), point_idx, &elems_clust_k);
-				let sum_ln_diss_ik = row_sum(data.ln_diss_mat(), point_idx, &elems_clust_k);
+				let gamma_ik =
+					params.gamma() + row_sum(data.dissimilarities(), point_idx, &elems_clust_k);
+				let sum_ln_diss_ik = row_sum(data.ln_dissimilarities(), point_idx, &elems_clust_k);
 
 				let l1_ik = ln_gamma(alpha_ik) - alpha_ik * beta_ik.ln()
 					+ alpha_beta_ratio
@@ -173,7 +170,7 @@ impl MCMCState {
 
 			// If we are under the maximum number of clusters, we can consider inserting a
 			// new cluster
-			if clust_list.len() < params.n_clusts_range().end().get() {
+			if clust_list.len() < params.max_num_clusts().get() {
 				candidate_clusts
 					.push(clust_sizes.iter().position(|&x| x == 0).unwrap() as ClusterLabel);
 				ln_probs.push((k_i + 1.0).ln() + self.r * ln_1_minus_p + sum_l3_ik);
