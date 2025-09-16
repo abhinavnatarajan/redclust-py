@@ -12,7 +12,7 @@ use pyo3::prelude::*;
 use crate::*;
 
 #[cfg(feature = "python-module")]
-mod bindings;
+mod python_bindings;
 
 /// Struct to hold the dissimilarities matrix.
 #[derive(Debug, Clone, PartialEq)]

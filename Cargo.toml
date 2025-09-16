@@ -10,10 +10,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 accessory = "2.0.0"
-anyhow = "1.0.98"
+anyhow = "1.0.98" # error handling
 derive_more = { version = "2.0.1", features = ["display", "debug"] }
 itertools = "0.14.0"
-kmedoids = "0.5.3"
+kmedoids = "0.5.3" # for initializing the prior
 ndarray = { version = "0.16.1", features = ["rayon"] }
 ndarray-linalg = "0.17.0"
 num-traits = "0.2.19"
@@ -25,7 +25,7 @@ pyo3 = { version = "0.24.0", features = [
 rand = { version = "0.8.0" }
 rand_xoshiro = "0.6.0"
 rayon = "1.10.0"
-special = "0.11.4"
+special = "0.11.4" # for digamma and trigamma functions
 statrs = { version = "0.18.0", default-features = false, features = ["rand"] }
 
 [features]

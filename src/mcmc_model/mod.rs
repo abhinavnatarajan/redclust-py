@@ -23,21 +23,14 @@ use crate::{
 };
 
 mod prior_hyper_params;
+mod likelihood_options;
 #[cfg(feature = "python-module")]
 mod python_bindings;
 
 pub use prior_hyper_params::PriorHyperParams;
-use prior_hyper_params::{
-	DEFAULT_MAX_NUM_CLUSTS,
-	DEFAULT_MIN_NUM_CLUSTS,
-	DEFAULT_REPULSION,
-};
+pub use likelihood_options::LikelihoodOptions;
 
 const NONZERO_THOUSAND: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
-pub(super) const DEFAULT_MCMC_ITERS_RP_FITPRIOR: NonZeroUsize = NONZERO_THOUSAND;
-pub(super) const DEFAULT_MLE_ITERS_FITPRIOR: NonZeroUsize = NONZERO_THOUSAND;
-pub(super) const DEFAULT_MCMC_ITERS_N_CLUSTS_FITPRIOR: NonZeroUsize = NONZERO_THOUSAND;
-
 /// Distribution on cluster sizes induced by the prior hyperparameters.
 #[derive(Clone)]
 pub struct ClusterSizePrior {
@@ -114,20 +107,17 @@ impl Distribution<f64> for InterClusterDissimilarityPrior {
 /// initialized state for the sampler.
 pub fn init_from_data<R: Rng>(
 	data: &MCMCData,
-	min_num_clusts: NonZeroUsize,
-	max_num_clusts: NonZeroUsize,
-	repulsion: bool,
+	model_options: LikelihoodOptions,
 	mcmc_iters_rp: NonZeroUsize,
 	mle_iters: NonZeroUsize,
 	mcmc_iters_n_clusts: NonZeroUsize,
 	rng: &mut R,
 ) -> Result<(MCMCState, PriorHyperParams)> {
 	let mut result =
-		PriorHyperParams::default().with_range_num_clusts(min_num_clusts..=max_num_clusts)?;
-	result.set_repulsion(repulsion);
+		PriorHyperParams::default();
 	let n_pts = data.num_points();
-	let min_num_clusts = result.min_num_clusts().get();
-	let max_num_clusts = result.max_num_clusts().get();
+	let min_num_clusts = model_options.min_num_clusts().get();
+	let max_num_clusts = model_options.max_num_clusts().get();
 	if !(min_num_clusts..=max_num_clusts).contains(&n_pts.get()) {
 		return Err(anyhow!(
 			"Number of clusters must be between {} and {}.",
@@ -307,20 +297,16 @@ pub fn init_from_data<R: Rng>(
 #[pyfunction(name = "init_from_data",
 		signature = (
 			data,
-			min_num_clusts=DEFAULT_MIN_NUM_CLUSTS,
-			max_num_clusts=DEFAULT_MAX_NUM_CLUSTS,
-			repulsion=DEFAULT_REPULSION,
-			mcmc_iters_rp=DEFAULT_MCMC_ITERS_RP_FITPRIOR,
-			mle_iters=DEFAULT_MLE_ITERS_FITPRIOR,
-			mcmc_iters_n_clusts=DEFAULT_MCMC_ITERS_N_CLUSTS_FITPRIOR,
+			model_options=LikelihoodOptions::default(),
+			mcmc_iters_rp=NONZERO_THOUSAND,
+			mle_iters=NONZERO_THOUSAND,
+			mcmc_iters_n_clusts=NONZERO_THOUSAND,
 			rng_seed=None,
 			)
 		)]
 fn py_init_from_data(
 	data: &MCMCData,
-	min_num_clusts: NonZeroUsize,
-	max_num_clusts: NonZeroUsize,
-	repulsion: bool,
+	model_options: LikelihoodOptions,
 	mcmc_iters_rp: NonZeroUsize,
 	mle_iters: NonZeroUsize,
 	mcmc_iters_n_clusts: NonZeroUsize,
@@ -329,9 +315,7 @@ fn py_init_from_data(
 	let mut rng = get_rng(rng_seed);
 	init_from_data(
 		data,
-		min_num_clusts,
-		max_num_clusts,
-		repulsion,
+		model_options,
 		mcmc_iters_rp,
 		mle_iters,
 		mcmc_iters_n_clusts,
@@ -341,7 +325,7 @@ fn py_init_from_data(
 
 #[cfg(feature = "python-module")]
 #[pymodule]
-pub(crate) fn prior_pymodule(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub(crate) fn mcmc_model_pymodule(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_function(wrap_pyfunction!(py_init_from_data, m)?)?;
 	Ok(())
 }

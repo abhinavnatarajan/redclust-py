@@ -1,7 +1,7 @@
 use std::{
 	fmt::{Debug, Display, Formatter},
 	num::NonZeroUsize,
-	ops::RangeInclusive,
+	collections::HashMap,
 };
 
 use accessory::Accessors;
@@ -11,25 +11,10 @@ use pyo3::prelude::*;
 use statrs::distribution::{Beta, Gamma};
 
 use super::{InterClusterDissimilarityPrior, IntraClusterDissimilarityPrior};
-use crate::prior::{ClusterSizePrior, NumClustersPrior};
-
-pub(super) const DEFAULT_DELTA1: f64 = 1.0;
-pub(super) const DEFAULT_DELTA2: f64 = 1.0;
-pub(super) const DEFAULT_ALPHA: f64 = 1.0;
-pub(super) const DEFAULT_BETA: f64 = 1.0;
-pub(super) const DEFAULT_ZETA: f64 = 1.0;
-pub(super) const DEFAULT_GAMMA: f64 = 1.0;
-pub(super) const DEFAULT_ETA: f64 = 1.0;
-pub(super) const DEFAULT_SIGMA: f64 = 1.0;
-pub(super) const DEFAULT_PROPOSALSD_R: f64 = 1.0;
-pub(super) const DEFAULT_U: f64 = 1.0;
-pub(super) const DEFAULT_V: f64 = 1.0;
-pub(super) const DEFAULT_REPULSION: bool = true;
-pub(super) const DEFAULT_MIN_NUM_CLUSTS: NonZeroUsize = NonZeroUsize::new(1).unwrap();
-pub(super) const DEFAULT_MAX_NUM_CLUSTS: NonZeroUsize = NonZeroUsize::new(usize::MAX).unwrap();
+use crate::mcmc_model::{ClusterSizePrior, NumClustersPrior};
 
 /// Prior hyper-parameters for the Bayesian distance clustering algorithm.
-#[derive(Debug, Clone, Accessors, PartialEq)]
+#[derive(Debug, Accessors, PartialEq)]
 #[access(get, defaults(get(cp)))]
 #[cfg_attr(feature = "python-module", pyclass(get_all, str, eq))]
 pub struct PriorHyperParams {
@@ -93,17 +78,6 @@ pub struct PriorHyperParams {
 	/// cluster sizes. Greater values for v leads to smaller and less variable
 	/// cluster sizes.
 	v: f64,
-
-	/// Whether to use repulsive terms in the likelihood function when
-	/// clustering.
-	#[access(set)]
-	repulsion: bool,
-
-	/// Minimum number of clusters to allow in the clustering.
-	min_num_clusts: NonZeroUsize,
-
-	/// Maximum number of clusters to allow in the clustering.
-	max_num_clusts: NonZeroUsize,
 }
 
 impl PriorHyperParams {
@@ -305,28 +279,6 @@ impl PriorHyperParams {
 		Ok(self)
 	}
 
-	/// Set the range of allowed values for the number of clusters.
-	pub fn set_range_num_clusts(
-		&mut self,
-		range_num_clusts: RangeInclusive<NonZeroUsize>,
-	) -> Result<&mut Self> {
-		if range_num_clusts.is_empty() {
-			return Err(anyhow!("Range must be non-empty"));
-		}
-		self.min_num_clusts = *range_num_clusts.start();
-		self.max_num_clusts = *range_num_clusts.end();
-		Ok(self)
-	}
-
-	/// Set the range of allowed values for the number of clusters.
-	pub fn with_range_num_clusts(
-		mut self,
-		range_num_clusts: RangeInclusive<NonZeroUsize>,
-	) -> Result<Self> {
-		self.set_range_num_clusts(range_num_clusts)?;
-		Ok(self)
-	}
-
 	/// Prior distribution on r.
 	pub fn r_prior(&self) -> Result<Gamma> { Ok(Gamma::new(self.eta, self.sigma)?) }
 
@@ -372,21 +324,18 @@ impl PriorHyperParams {
 
 impl Default for PriorHyperParams {
 	fn default() -> Self {
-		PriorHyperParams {
-			delta1: DEFAULT_DELTA1,
-			delta2: DEFAULT_DELTA2,
-			alpha: DEFAULT_ALPHA,
-			beta: DEFAULT_BETA,
-			zeta: DEFAULT_ZETA,
-			gamma: DEFAULT_GAMMA,
-			eta: DEFAULT_ETA,
-			sigma: DEFAULT_SIGMA,
-			proposalsd_r: DEFAULT_PROPOSALSD_R,
-			u: DEFAULT_U,
-			v: DEFAULT_V,
-			repulsion: DEFAULT_REPULSION,
-			min_num_clusts: DEFAULT_MIN_NUM_CLUSTS,
-			max_num_clusts: DEFAULT_MAX_NUM_CLUSTS,
+		Self {
+			delta1: 1.0,
+			delta2: 1.0,
+			alpha: 1.0,
+			beta: 1.0,
+			zeta: 1.0,
+			gamma: 1.0,
+			eta: 1.0,
+			sigma: 1.0,
+			proposalsd_r: 1.0,
+			u: 1.0,
+			v: 1.0,
 		}
 	}
 }
@@ -396,8 +345,7 @@ impl Display for PriorHyperParams {
 		write!(
 			f,
 			"PriorHyperParams {{\ndelta1: {},\ndelta2: {},\nalpha: {},\nbeta: {},\nzeta: \
-			 {},\ngamma: {},\neta: {},\nsigma: {},\nproposalsd_r: {},\nu: {},\nv: {},\nrepulsion: \
-			 {},\nmin_num_clusts: {:#?}\nmax_num_clusts: {:#?}\n}}",
+			 {},\ngamma: {},\neta: {},\nsigma: {},\nproposalsd_r: {},\nu: {},\nv: {}\n}}",
 			self.delta1,
 			self.delta2,
 			self.alpha,
@@ -409,9 +357,24 @@ impl Display for PriorHyperParams {
 			self.proposalsd_r,
 			self.u,
 			self.v,
-			self.repulsion,
-			self.min_num_clusts,
-			self.max_num_clusts,
 		)
+	}
+}
+
+impl From<&PriorHyperParams> for HashMap<String, f64> {
+	fn from(params: &PriorHyperParams) -> Self {
+		let mut map = HashMap::new();
+		map.insert("delta1".to_string(), params.delta1());
+		map.insert("delta2".to_string(), params.delta2());
+		map.insert("alpha".to_string(), params.alpha());
+		map.insert("beta".to_string(), params.beta());
+		map.insert("zeta".to_string(), params.zeta());
+		map.insert("gamma".to_string(), params.gamma());
+		map.insert("eta".to_string(), params.eta());
+		map.insert("sigma".to_string(), params.sigma());
+		map.insert("proposalsd_r".to_string(), params.proposalsd_r());
+		map.insert("u".to_string(), params.u());
+		map.insert("v".to_string(), params.v());
+		map
 	}
 }

@@ -1,10 +1,13 @@
-use std::num::NonZeroUsize;
+use std::{
+	num::NonZeroUsize,
+	collections::HashMap,
+};
 
 use anyhow::Result;
 use itertools::Itertools;
 use ndarray::Array1;
 use numpy::PyArray1;
-use pyo3::{prelude::*, types::PyDict};
+use pyo3::prelude::*;
 use rand::distributions::Distribution;
 
 use super::PriorHyperParams;
@@ -87,18 +90,6 @@ impl PriorHyperParams {
 	#[setter(proposalsd_r)]
 	fn py_set_proposalsd_r(this: Bound<'_, Self>, proposalsd_r: f64) -> Result<()> {
 		this.borrow_mut().set_proposalsd_r(proposalsd_r)?;
-		Ok(())
-	}
-
-	/// Set the range of allowed values for the number of clusters.
-	#[pyo3(name = "set_range_num_clusts")]
-	fn py_set_range_num_clusts(
-		this: Bound<'_, Self>,
-		min_num_clusts: NonZeroUsize,
-		max_num_clusts: NonZeroUsize,
-	) -> Result<()> {
-		this.borrow_mut()
-			.set_range_num_clusts(min_num_clusts..=max_num_clusts)?;
 		Ok(())
 	}
 
@@ -221,8 +212,7 @@ impl PriorHyperParams {
 	fn __repr__(&self) -> String {
 		format!(
 			"PriorHyperParams(delta1={}, delta2={}, alpha={}, beta={}, zeta={}, gamma={}, eta={}, \
-			 sigma={}, proposalsd_r={}, u={}, v={}, repulsion={}, min_num_clusts={}, \
-			 max_num_clusts={})",
+			 sigma={}, proposalsd_r={}, u={}, v={})",
 			self.delta1(),
 			self.delta2(),
 			self.alpha(),
@@ -234,31 +224,11 @@ impl PriorHyperParams {
 			self.proposalsd_r(),
 			self.u(),
 			self.v(),
-			self.repulsion(),
-			self.min_num_clusts(),
-			self.max_num_clusts(),
 		)
 	}
 
 	/// Convert the PriorHyperParams object to a dictionary.
-	fn as_dict(this: Bound<'_, Self>) -> Result<Bound<'_, PyDict>> {
-		let py = this.py();
-		let this = this.borrow();
-		let dict: Bound<'_, PyDict> = PyDict::new(py);
-		dict.set_item("delta1", this.delta1())?;
-		dict.set_item("delta2", this.delta2())?;
-		dict.set_item("alpha", this.alpha())?;
-		dict.set_item("beta", this.beta())?;
-		dict.set_item("zeta", this.zeta())?;
-		dict.set_item("gamma", this.gamma())?;
-		dict.set_item("eta", this.eta())?;
-		dict.set_item("sigma", this.sigma())?;
-		dict.set_item("proposalsd_r", this.proposalsd_r())?;
-		dict.set_item("u", this.u())?;
-		dict.set_item("v", this.v())?;
-		dict.set_item("repulsion", this.repulsion())?;
-		dict.set_item("min_num_clusts", this.min_num_clusts())?;
-		dict.set_item("max_num_clusts", this.max_num_clusts())?;
-		Ok(dict)
+	fn as_dict(&self) -> HashMap<String, f64> {
+		HashMap::from(self)
 	}
 }

@@ -7,8 +7,7 @@ mod mcmc_data;
 mod mcmc_options;
 mod mcmc_result;
 mod mcmc_state;
-mod prior;
-mod sampling;
+mod mcmc_model;
 mod util_types;
 mod utils;
 
@@ -16,7 +15,7 @@ pub use mcmc_data::*;
 pub use mcmc_options::*;
 pub use mcmc_result::*;
 pub use mcmc_state::*;
-pub use prior::*;
+pub use mcmc_model::*;
 use util_types::*;
 use utils::*;
 
@@ -29,6 +28,6 @@ fn redclust(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<MCMCResult>()?;
 	m.add_class::<MCMCState>()?;
 	m.add_function(wrap_pyfunction!(mcmc::py_run_sampler, m)?)?;
-	m.add_wrapped(wrap_pymodule!(prior::prior_pymodule))?;
+	m.add_wrapped(wrap_pymodule!(mcmc_model::mcmc_model_pymodule))?;
 	Ok(())
 }

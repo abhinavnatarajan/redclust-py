@@ -8,6 +8,7 @@ use statrs::{
 };
 
 use crate::*;
+
 impl MCMCState {
 	/// Sample p from its conditional posterior.
 	pub(crate) fn sample_p_conditional<R: Rng>(
@@ -72,7 +73,8 @@ impl MCMCState {
 	pub(crate) fn sample_clusters_gibbs_restricted<R: Rng>(
 		&mut self,
 		data: &MCMCData,
-		params: &PriorHyperParams,
+		prior_params: &PriorHyperParams,
+		likelihood_options: &LikelihoodOptions,
 		rng: &mut R,
 	) -> Result<&mut Self> {
 		let n_pts = self.clust_labels.len();
@@ -82,16 +84,17 @@ impl MCMCState {
 	pub(crate) fn sample_clusters_gibbs<R: Rng>(
 		&mut self,
 		data: &MCMCData,
-		params: &PriorHyperParams,
+		prior_params: &PriorHyperParams,
+		likelihood_options: &LikelihoodOptions,
 		rng: &mut R,
 	) -> Result<&mut Self> {
 		let n_pts = self.clust_labels.len();
 
 		// Pre-compute some quantities to speed up subsequent calculations.
-		let alpha_beta_ratio = params.alpha() * params.beta().ln() - ln_gamma(params.alpha());
-		let zeta_gamma_ratio = params.zeta() * params.gamma().ln() - ln_gamma(params.zeta());
-		let ln_gamma_delta1 = ln_gamma(params.delta1());
-		let ln_gamma_delta2 = ln_gamma(params.delta2());
+		let alpha_beta_ratio = prior_params.alpha() * prior_params.beta().ln() - ln_gamma(prior_params.alpha());
+		let zeta_gamma_ratio = prior_params.zeta() * prior_params.gamma().ln() - ln_gamma(prior_params.zeta());
+		let ln_gamma_delta1 = ln_gamma(prior_params.delta1());
+		let ln_gamma_delta2 = ln_gamma(prior_params.delta2());
 		let ln_p = self.p.ln();
 		let ln_1_minus_p = (1.0 - self.p).ln();
 
@@ -114,7 +117,7 @@ impl MCMCState {
 
 			// We cannot move the ith point to a different cluster if it is in a singleton
 			// cluster and we are already at the minimum number of clusters.
-			if clust_list.len() == params.min_num_clusts().get()
+			if clust_list.len() == likelihood_options.min_num_clusts().get()
 				&& clust_sizes[*current_label as usize] == 1
 			{
 				continue;
@@ -143,24 +146,24 @@ impl MCMCState {
 			) {
 				let elems_clust_k = clust_labels.iter().positions(|&x| x == k).collect_vec();
 				let sz_k = clust_sizes[k as usize] as f64;
-				let alpha_ik = params.alpha() + params.delta1() * sz_k;
+				let alpha_ik = prior_params.alpha() + prior_params.delta1() * sz_k;
 				let beta_ik =
-					params.beta() + row_sum(data.dissimilarities(), point_idx, &elems_clust_k);
-				let zeta_ik = params.zeta() + params.delta2() * sz_k;
+					prior_params.beta() + row_sum(data.dissimilarities(), point_idx, &elems_clust_k);
+				let zeta_ik = prior_params.zeta() + prior_params.delta2() * sz_k;
 				let gamma_ik =
-					params.gamma() + row_sum(data.dissimilarities(), point_idx, &elems_clust_k);
+					prior_params.gamma() + row_sum(data.dissimilarities(), point_idx, &elems_clust_k);
 				let sum_ln_diss_ik = row_sum(data.ln_dissimilarities(), point_idx, &elems_clust_k);
 
 				let l1_ik = ln_gamma(alpha_ik) - alpha_ik * beta_ik.ln()
 					+ alpha_beta_ratio
-					+ (params.delta1() - 1.0) * sum_ln_diss_ik
+					+ (prior_params.delta1() - 1.0) * sum_ln_diss_ik
 					- sz_k * ln_gamma_delta1;
 				*ln_prob_k =
 					(sz_k + 1.0).ln() + ln_p + (sz_k - 1.0 + self.r).ln() - sz_k.ln() + l1_ik;
 
 				*l3_ik = ln_gamma(zeta_ik) - zeta_ik * gamma_ik.ln()
 					+ zeta_gamma_ratio
-					+ (params.delta2() - 1.0) * sum_ln_diss_ik
+					+ (prior_params.delta2() - 1.0) * sum_ln_diss_ik
 					- sz_k * ln_gamma_delta2;
 			}
 			let sum_l3_ik: f64 = l3_i.iter().sum();
@@ -170,7 +173,7 @@ impl MCMCState {
 
 			// If we are under the maximum number of clusters, we can consider inserting a
 			// new cluster
-			if clust_list.len() < params.max_num_clusts().get() {
+			if clust_list.len() < likelihood_options.max_num_clusts().get() {
 				candidate_clusts
 					.push(clust_sizes.iter().position(|&x| x == 0).unwrap() as ClusterLabel);
 				ln_probs.push((k_i + 1.0).ln() + self.r * ln_1_minus_p + sum_l3_ik);

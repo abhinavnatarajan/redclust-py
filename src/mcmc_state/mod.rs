@@ -11,6 +11,8 @@ use itertools::Itertools;
 use pyo3::prelude::*;
 
 use crate::ClusterLabel;
+mod sampling;
+
 const DEFAULT_R: f64 = 1.0;
 const DEFAULT_P: f64 = 0.5;
 
