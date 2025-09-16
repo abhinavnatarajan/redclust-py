@@ -16,6 +16,9 @@ use rand::{
 use rand_xoshiro::Xoshiro256PlusPlus;
 use special::Gamma;
 
+mod types;
+pub use types::*;
+
 /// Sum of the elements in a row of a matrix, given the row index and the column
 /// indices to sum over.
 /// Panics if the row index or any of the column indices are out of bounds.

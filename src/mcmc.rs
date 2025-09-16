@@ -2,7 +2,7 @@ use std::thread;
 
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
-use ndarray::{Array1, s};
+#[cfg(feature = "python-module")]
 use pyo3::prelude::*;
 use rand::Rng;
 use rayon::prelude::*;
@@ -12,31 +12,6 @@ use statrs::{
 };
 
 use crate::*;
-
-// Mean, variance, autocorrelation function, integrated autocorrelation time,
-// and effective sample size.
-fn aux_stats(x: &Array1<f64>) -> (f64, f64, Vec<f64>, f64, f64) {
-	if x.is_empty() {
-		return (0.0, 0.0, vec![], 0.0, 0.0);
-	}
-	let lags = (0..(x.len() - 1).min(10 * (x.len() as f64).log10() as usize)).collect_vec();
-	let n = x.len();
-	let mean = x.mean().unwrap();
-	let var = x.var(0.0);
-	let y = x - mean;
-	let mut acf = Vec::with_capacity(lags.len());
-	for lag in lags {
-		if lag >= n {
-			acf.push(0.0);
-		} else {
-			acf.push(y.slice(s![..n - lag]).dot(&y.slice(s![lag..])) / var);
-		}
-	}
-	let iac = acf.iter().sum::<f64>() * 2.0;
-	let ess = x.len() as f64 / iac;
-	(mean, var, acf, iac, ess)
-}
-
 /// Log-likelihood of the clustering, which depends on the data and the cluster
 /// labels. Will only consider the first n points in the data where
 /// ``n=state.clust_labels.len()``.

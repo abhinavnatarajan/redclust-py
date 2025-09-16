@@ -24,8 +24,6 @@ use crate::{
 
 mod prior_hyper_params;
 mod likelihood_options;
-#[cfg(feature = "python-module")]
-mod python_bindings;
 
 pub use prior_hyper_params::PriorHyperParams;
 pub use likelihood_options::LikelihoodOptions;

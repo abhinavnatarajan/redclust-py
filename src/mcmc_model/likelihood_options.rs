@@ -7,7 +7,7 @@ use std::{
 use accessory::Accessors;
 use anyhow::{Result, anyhow};
 #[cfg(feature = "python-module")]
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyDict};
 
 /// Parameters that modify the underlying clustering algorithm.
 #[derive(Debug, Clone, Accessors, PartialEq)]
@@ -77,12 +77,20 @@ impl LikelihoodOptions {
 	/// Set the range of allowed values for the number of clusters.
 	#[pyo3(name = "set_range_num_clusts")]
 	fn py_set_range_num_clusts(
-		this: Bound<'_, Self>,
+		&mut self,
 		min_num_clusts: NonZeroUsize,
 		max_num_clusts: NonZeroUsize,
 	) -> Result<()> {
-		this.borrow_mut()
-			.set_range_num_clusts(min_num_clusts..=max_num_clusts)?;
+		self.set_range_num_clusts(min_num_clusts..=max_num_clusts)?;
 		Ok(())
+	}
+
+	fn as_dict(this: Bound<'_, Self>) -> Result<Bound<'_, PyDict>> {
+		let this = this.borrow();
+		let dict: Bound<'_, PyDict> = PyDict::new(this.py());
+		dict.set_item("repulsion", this.repulsion)?;
+		dict.set_item("min_num_clusts", this.min_num_clusts)?;
+		dict.set_item("max_num_clusts", this.max_num_clusts)?;
+		Ok(dict)
 	}
 }

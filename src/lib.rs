@@ -8,7 +8,6 @@ mod mcmc_options;
 mod mcmc_result;
 mod mcmc_state;
 mod mcmc_model;
-mod util_types;
 mod utils;
 
 pub use mcmc_data::*;
@@ -16,7 +15,6 @@ pub use mcmc_options::*;
 pub use mcmc_result::*;
 pub use mcmc_state::*;
 pub use mcmc_model::*;
-use util_types::*;
 use utils::*;
 
 /// Bayesian distance clustering using cohesion and repulsion.

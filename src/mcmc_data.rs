@@ -7,12 +7,11 @@ use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2, Zip};
 use ndarray_linalg::Norm;
 #[cfg(feature = "python-module")]
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyType};
+#[cfg(feature = "python-module")]
+use numpy::{PyArray2, PyArrayMethods};
 
 use crate::*;
-
-#[cfg(feature = "python-module")]
-mod python_bindings;
 
 /// Struct to hold the dissimilarities matrix.
 #[derive(Debug, Clone, PartialEq)]
@@ -174,4 +173,57 @@ impl Display for MCMCData {
 	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
 		write!(f, "MCMCData {{\ndiss_mat:\n{}\n}}", self.dissimilarities)
 	}
+}
+
+#[cfg(feature = "python-module")]
+#[pymethods]
+impl MCMCData {
+	/// Create a new MCMCData instance with the specified dissimilarities
+	/// matrix. The matrix must be non-empty, symmetric, with non-negative
+	/// entries that are zero on the diagonal.
+	#[classmethod]
+	#[pyo3(name = "from_dissimilarities")]
+	fn py_from_dissimilarities(
+		_: Bound<'_, PyType>,
+		diss_mat: Bound<'_, PyArray2<f64>>,
+	) -> Result<Self> {
+		Self::from_dissimilarities(diss_mat.to_owned_array())
+	}
+
+	/// Create a new MCMCData instance with the specified point cloud using the
+	/// standard Euclidean 2-norm. The input should be a non-empty 2D array of
+	/// shape (n_pts, n_dims).
+	#[classmethod]
+	#[pyo3(name = "from_points")]
+	fn py_from_points(_: Bound<'_, PyType>, points: Bound<'_, PyArray2<f64>>) -> Result<Self> {
+		Self::from_points(points.to_owned_array())
+	}
+
+	/// Get a copy of the dissimilarities matrix.
+	#[getter(dissimilarities)]
+	fn py_get_dissimilarities(&self) -> &Array2Wrapper<f64> { &self.dissimilarities }
+
+	/// Given cluster labels, return the set of all within-cluster
+	/// dissimilarities.
+	#[pyo3(name = "within_cluster_dissimilarities")]
+	fn py_within_cluster_dissimilarities(
+		&self,
+		clust_labels: Vec<ClusterLabel>,
+	) -> Result<Array1Wrapper<f64>> {
+		self.within_cluster_dissimilarities(&clust_labels)
+			.map(Array1Wrapper)
+	}
+
+	/// Given cluster labels, return the set of all inter-cluster
+	/// dissimilarities.
+	#[pyo3(name = "inter_cluster_dissimilarities")]
+	fn py_inter_cluster_dissimilarities(
+		&self,
+		clust_labels: Vec<ClusterLabel>,
+	) -> Result<Array1Wrapper<f64>> {
+		self.inter_cluster_dissimilarities(&clust_labels)
+			.map(Array1Wrapper)
+	}
+
+	fn __repr__(&self) -> String { format!("MCMCData(diss_mat={:#?})", self.dissimilarities.0) }
 }

@@ -1,17 +1,23 @@
 use std::{
+	collections::HashMap,
 	fmt::{Debug, Display, Formatter},
 	num::NonZeroUsize,
-	collections::HashMap,
 };
 
 use accessory::Accessors;
 use anyhow::{Result, anyhow};
+use ndarray::Array1;
 #[cfg(feature = "python-module")]
 use pyo3::prelude::*;
+use rand::distributions::Distribution;
 use statrs::distribution::{Beta, Gamma};
 
 use super::{InterClusterDissimilarityPrior, IntraClusterDissimilarityPrior};
-use crate::mcmc_model::{ClusterSizePrior, NumClustersPrior};
+use crate::{
+	Array1Wrapper,
+	mcmc_model::{ClusterSizePrior, NumClustersPrior},
+	utils::get_rng,
+};
 
 /// Prior hyper-parameters for the Bayesian distance clustering algorithm.
 #[derive(Debug, Accessors, PartialEq)]
@@ -377,4 +383,202 @@ impl From<&PriorHyperParams> for HashMap<String, f64> {
 		map.insert("v".to_string(), params.v());
 		map
 	}
+}
+
+#[cfg(feature = "python-module")]
+#[pymethods]
+impl PriorHyperParams {
+	/// Set the hyperparameter delta1.
+	#[setter(delta1)]
+	fn py_set_delta1(&mut self, delta1: f64) -> Result<()> {
+		self.set_delta1(delta1)?;
+		Ok(())
+	}
+
+	/// Set the hyperparameter delta2.
+	#[setter(delta2)]
+	fn py_set_delta2(&mut self, delta2: f64) -> Result<()> {
+		self.set_delta2(delta2)?;
+		Ok(())
+	}
+
+	/// Set the hyperparameter alpha.
+	#[setter(alpha)]
+	fn py_set_alpha(&mut self, alpha: f64) -> Result<()> {
+		self.set_alpha(alpha)?;
+		Ok(())
+	}
+
+	/// Set the hyperparameter beta.
+	#[setter(beta)]
+	fn py_set_beta(&mut self, beta: f64) -> Result<()> {
+		self.set_beta(beta)?;
+		Ok(())
+	}
+
+	/// Set the hyperparameter zeta.
+	#[setter(zeta)]
+	fn py_set_zeta(&mut self, zeta: f64) -> Result<()> {
+		self.set_zeta(zeta)?;
+		Ok(())
+	}
+
+	/// Set the hyperparameter gamma.
+	#[setter(gamma)]
+	fn py_set_gamma(&mut self, gamma: f64) -> Result<()> {
+		self.set_gamma(gamma)?;
+		Ok(())
+	}
+
+	/// Set the hyperparameter eta.
+	#[setter(eta)]
+	fn py_set_eta(&mut self, eta: f64) -> Result<()> {
+		self.set_eta(eta)?;
+		Ok(())
+	}
+
+	/// Set the hyperparameter sigma.
+	#[setter(sigma)]
+	fn py_set_sigma(&mut self, sigma: f64) -> Result<()> {
+		self.set_sigma(sigma)?;
+		Ok(())
+	}
+
+	/// Set the hyperparameter u.
+	#[setter(u)]
+	fn py_set_u(&mut self, u: f64) -> Result<()> {
+		self.set_u(u)?;
+		Ok(())
+	}
+
+	/// Set the hyperparameter v.
+	#[setter(v)]
+	fn py_set_v(&mut self, v: f64) -> Result<()> {
+		self.set_v(v)?;
+		Ok(())
+	}
+
+	/// Set the hyperparameter proposalsd_r.
+	#[setter(proposalsd_r)]
+	fn py_set_proposalsd_r(&mut self, proposalsd_r: f64) -> Result<()> {
+		self.set_proposalsd_r(proposalsd_r)?;
+		Ok(())
+	}
+
+	/// Create a default instance of this struct.
+	#[new]
+	pub fn py_new() -> Self { PriorHyperParams::default() }
+
+	/// Sample r from its prior.
+	#[pyo3(name = "sample_r")]
+	fn py_sample_r(&self, n_samples: usize, rng_seed: Option<u64>) -> Result<Array1Wrapper<f64>> {
+		let mut rng = get_rng(rng_seed);
+		let samples = self
+			.r_prior()?
+			.sample_iter(&mut rng)
+			.take(n_samples)
+			.collect::<Array1<_>>();
+		Ok(Array1Wrapper(samples))
+	}
+
+	/// Sample p from its prior.
+	#[pyo3(name = "sample_p")]
+	fn py_sample_p(&self, n_samples: usize, rng_seed: Option<u64>) -> Result<Array1Wrapper<f64>> {
+		let mut rng = get_rng(rng_seed);
+		let samples = self
+			.p_prior()?
+			.sample_iter(&mut rng)
+			.take(n_samples)
+			.collect::<Array1<_>>();
+		Ok(Array1Wrapper(samples))
+	}
+
+	/// Sample from the induced prior on cluster sizes.
+	#[pyo3(name = "sample_cluster_sizes")]
+	fn py_sample_cluster_sizes(
+		&mut self,
+		n_samples: usize,
+		rng_seed: Option<u64>,
+	) -> Result<Array1Wrapper<usize>> {
+		let mut rng = get_rng(rng_seed);
+		let samples = self
+			.cluster_size_prior()?
+			.sample_iter(&mut rng)
+			.take(n_samples)
+			.collect::<Array1<_>>();
+		Ok(Array1Wrapper(samples))
+	}
+
+	/// Sample from the induced prior on the number of clusters, conditioned on
+	/// the number of points.
+	#[pyo3(name = "sample_n_clusts")]
+	fn py_sample_n_clusts(
+		&mut self,
+		n_pts: NonZeroUsize,
+		n_samples: usize,
+		rng_seed: Option<u64>,
+	) -> Result<Array1Wrapper<usize>> {
+		let mut rng = get_rng(rng_seed);
+		let samples = self
+			.num_clusters_prior(n_pts)?
+			.sample_iter(&mut rng)
+			.take(n_samples)
+			.collect::<Array1<_>>();
+		Ok(Array1Wrapper(samples))
+	}
+
+	/// Sample from the induced prior on within-cluster distances,
+	/// marginalising over cluster-specific parameters.
+	#[pyo3(name = "sample_within_cluster_dists")]
+	fn py_sample_within_cluster_dists(
+		&mut self,
+		n_samples: usize,
+		rng_seed: Option<u64>,
+	) -> Result<Array1Wrapper<f64>> {
+		let mut rng = get_rng(rng_seed);
+		let samples = self
+			.intra_cluster_dissimilarity_prior()?
+			.sample_iter(&mut rng)
+			.take(n_samples)
+			.collect::<Array1<_>>();
+		Ok(Array1Wrapper(samples))
+	}
+
+	/// Sample from the induced prior on inter-cluster distances, marginalising
+	/// over cluster-specific parameters.
+	#[pyo3(name = "sample_inter_cluster_dists")]
+	fn py_sample_inter_cluster_dists(
+		&mut self,
+		n_samples: usize,
+		rng_seed: Option<u64>,
+	) -> Result<Array1Wrapper<f64>> {
+		let mut rng = get_rng(rng_seed);
+		let samples = self
+			.inter_cluster_dissimilarity_prior()?
+			.sample_iter(&mut rng)
+			.take(n_samples)
+			.collect::<Array1<_>>();
+		Ok(Array1Wrapper(samples))
+	}
+
+	fn __repr__(&self) -> String {
+		format!(
+			"PriorHyperParams(delta1={}, delta2={}, alpha={}, beta={}, zeta={}, gamma={}, eta={}, \
+			 sigma={}, proposalsd_r={}, u={}, v={})",
+			self.delta1(),
+			self.delta2(),
+			self.alpha(),
+			self.beta(),
+			self.zeta(),
+			self.gamma(),
+			self.eta(),
+			self.sigma(),
+			self.proposalsd_r(),
+			self.u(),
+			self.v(),
+		)
+	}
+
+	/// Convert the PriorHyperParams object to a dictionary.
+	fn as_dict(&self) -> HashMap<String, f64> { HashMap::from(self) }
 }
