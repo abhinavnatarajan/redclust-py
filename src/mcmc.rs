@@ -11,18 +11,21 @@ use statrs::{
 	function::gamma::ln_gamma,
 };
 
-use crate::*;
+use crate::{
+	LikelihoodOptions, MCMCData, MCMCHelper, MCMCOptions, MCMCResult, MCMCState, PriorHyperParams,
+	utils::{get_rng, num_pairs, symm_mat_sum},
+};
 /// Log-likelihood of the clustering, which depends on the data and the cluster
 /// labels. Will only consider the first n points in the data where
 /// ``n=state.clust_labels.len()``.
 pub fn ln_likelihood(
+	state: &MCMCState,
 	data: &MCMCData,
-	mcmc_state: &MCMCState,
 	prior_params: &PriorHyperParams,
 	likelihood_options: &LikelihoodOptions,
 ) -> f64 {
-	let clust_labels = &mcmc_state.clust_labels;
-	let clust_list = mcmc_state.clust_list.iter().copied().collect_vec();
+	let clust_labels = &state.clust_labels;
+	let clust_list = state.clust_list.iter().copied().collect_vec();
 	let diss_mat = data.dissimilarities();
 	let ln_diss_mat = data.ln_dissimilarities();
 	let alpha = prior_params.alpha();
@@ -58,7 +61,7 @@ pub fn ln_likelihood(
 	let zeta_gamma_ratio = zeta * gamma.ln() - ln_gamma(zeta);
 	let delta2 = prior_params.delta2();
 	let lgamma_delta2 = ln_gamma(delta2);
-	let n_clusts = mcmc_state.num_clusts().get();
+	let n_clusts = state.num_clusts().get();
 	let lik_repulsive = (0..n_clusts)
 		.into_par_iter()
 		.map(|k| {
@@ -124,6 +127,7 @@ fn run_chain<R: Rng>(
 	rng: &mut R,
 ) -> Result<MCMCResult> {
 	let mut state = init_state.clone();
+	let mut helper = MCMCHelper::new(data, prior_params, likelihood_options, mcmc_options);
 	let n_samples = mcmc_options.num_samples();
 	let n_pts = data.num_points().get();
 	let mut result = MCMCResult::with_capacity(n_pts, n_samples);
@@ -138,22 +142,24 @@ fn run_chain<R: Rng>(
 			state
 				.sample_r_conditional(prior_params, rng)?
 				.sample_p_conditional(prior_params, rng)?
-				.sample_clusters_gibbs(data, prior_params, likelihood_options, rng)?;
+				.sample_cluster_labels(&mut helper, rng)?;
 			if state.r_accepted {
 				result.r_acceptance_rate += 1.0;
 			}
+			result.splitmerge_acceptance_rate += state.splitmerge_accepted as f64;
 			if (i - mcmc_options.num_burnin) % mcmc_options.thinning == 0 {
 				result.clusts[j].extend(state.clust_labels.iter());
 				result.num_clusts[j] = state.num_clusts().get();
 				result.r[j] = state.r;
 				result.p[j] = state.p;
 				result.ln_likelihood[j] =
-					ln_likelihood(data, &state, prior_params, likelihood_options);
+					ln_likelihood(&state, data, prior_params, likelihood_options);
 				result.ln_posterior[j] = result.ln_likelihood[j] + ln_prior(&state, prior_params);
 				j += 1;
 			}
 		}
 		result.r_acceptance_rate /= mcmc_options.num_iter as f64;
+		result.splitmerge_acceptance_rate /= mcmc_options.num_iter as f64;
 	}
 	Ok(result)
 }

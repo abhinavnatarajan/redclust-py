@@ -7,11 +7,14 @@ use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2, Zip};
 use ndarray_linalg::Norm;
 #[cfg(feature = "python-module")]
-use pyo3::{prelude::*, types::PyType};
-#[cfg(feature = "python-module")]
 use numpy::{PyArray2, PyArrayMethods};
+#[cfg(feature = "python-module")]
+use pyo3::{prelude::*, types::PyType};
 
-use crate::*;
+use crate::{
+	ClusterLabel,
+	utils::{Array1Wrapper, Array2Wrapper},
+};
 
 /// Struct to hold the dissimilarities matrix.
 #[derive(Debug, Clone, PartialEq)]
@@ -102,11 +105,15 @@ impl MCMCData {
 
 	/// Get a reference to the dissimilarities matrix owned by this object.
 	#[inline(always)]
-	pub fn dissimilarities(&self) -> &Array2<f64> { &self.dissimilarities.0 }
+	pub fn dissimilarities(&self) -> &Array2<f64> {
+		&self.dissimilarities.0
+	}
 
 	/// Get a reference to the log-dissimilarities matrix owned by this object.
 	#[inline(always)]
-	pub(crate) fn ln_dissimilarities(&self) -> &Array2<f64> { &self.ln_dissimilarities.0 }
+	pub(crate) fn ln_dissimilarities(&self) -> &Array2<f64> {
+		&self.ln_dissimilarities.0
+	}
 
 	/// Number of points in the data.
 	#[inline(always)]
@@ -201,7 +208,9 @@ impl MCMCData {
 
 	/// Get a copy of the dissimilarities matrix.
 	#[getter(dissimilarities)]
-	fn py_get_dissimilarities(&self) -> &Array2Wrapper<f64> { &self.dissimilarities }
+	fn py_get_dissimilarities(&self) -> &Array2Wrapper<f64> {
+		&self.dissimilarities
+	}
 
 	/// Given cluster labels, return the set of all within-cluster
 	/// dissimilarities.
@@ -225,5 +234,7 @@ impl MCMCData {
 			.map(Array1Wrapper)
 	}
 
-	fn __repr__(&self) -> String { format!("MCMCData(diss_mat={:#?})", self.dissimilarities.0) }
+	fn __repr__(&self) -> String {
+		format!("MCMCData(diss_mat={:#?})", self.dissimilarities.0)
+	}
 }

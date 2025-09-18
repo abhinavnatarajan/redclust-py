@@ -15,18 +15,15 @@ use statrs::{
 };
 
 use crate::{
-	ClusterLabel,
-	MCMCData,
-	MCMCOptions,
-	MCMCState,
+	ClusterLabel, MCMCData, MCMCOptions, MCMCState,
 	utils::{fit_beta_mle, fit_gamma_mle, get_rng, knee_pos, pmf, sample_from_ln_probs},
 };
 
-mod prior_hyper_params;
 mod likelihood_options;
+mod prior_hyper_params;
 
-pub use prior_hyper_params::PriorHyperParams;
 pub use likelihood_options::LikelihoodOptions;
+pub use prior_hyper_params::PriorHyperParams;
 
 const NONZERO_THOUSAND: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 /// Distribution on cluster sizes induced by the prior hyperparameters.
@@ -111,8 +108,7 @@ pub fn init_from_data<R: Rng>(
 	mcmc_iters_n_clusts: NonZeroUsize,
 	rng: &mut R,
 ) -> Result<(MCMCState, PriorHyperParams)> {
-	let mut result =
-		PriorHyperParams::default();
+	let mut result = PriorHyperParams::default();
 	let n_pts = data.num_points();
 	let min_num_clusts = model_options.min_num_clusts().get();
 	let max_num_clusts = model_options.max_num_clusts().get();

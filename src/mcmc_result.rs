@@ -7,7 +7,7 @@ use ndarray::{ArrayView1, s};
 #[cfg(feature = "python-module")]
 use pyo3::{prelude::*, types::PyDict};
 
-use crate::*;
+use crate::{ClusterLabel, utils::float_vec_max};
 
 /// Auxiliary statistics for MCMC samples: mean, variance, autocorrelation
 /// function, integrated autocorrelation time, and effective sample size.
@@ -29,7 +29,9 @@ pub struct AuxStats {
 }
 
 impl Display for AuxStats {
-	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> { Debug::fmt(self, f) }
+	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+		Debug::fmt(self, f)
+	}
 }
 
 /// Mean, variance, autocorrelation function, integrated autocorrelation time,
@@ -178,7 +180,9 @@ impl MCMCResult {
 }
 
 impl Display for MCMCResult {
-	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> { Debug::fmt(self, f) }
+	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+		Debug::fmt(self, f)
+	}
 }
 
 #[cfg(feature = "python-module")]

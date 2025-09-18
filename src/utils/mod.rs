@@ -7,9 +7,7 @@ use ndarray_linalg::SolveH;
 use num_traits::identities::Zero;
 use numpy::array;
 use rand::{
-	Rng,
-	RngCore,
-	SeedableRng,
+	Rng, RngCore, SeedableRng,
 	distributions::{Distribution, Uniform},
 	rngs::OsRng,
 };
@@ -32,23 +30,24 @@ pub fn get_rng(rng_seed: Option<u64>) -> Xoshiro256PlusPlus {
 }
 
 /// Sample from discrete distribution, in the form of a vector of
-/// log-probabilities, using the Gumbel-max trick. Will return an error if the
-/// vector contains any NaNs.
+/// log-probabilities, using the Gumbel-max trick.
+/// Will return an error if the vector contains any NaNs.
 pub fn sample_from_ln_probs<R: Rng + ?Sized>(p: &ArrayView1<f64>, rng: &mut R) -> Result<usize> {
-	let p = p - p.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+	let p_min = p.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+	let p_shifted = p - p_min;
 	let u = Uniform::from(0.0..=1.0)
 		.sample_iter(rng)
-		.take(p.len())
+		.take(p_shifted.len())
 		.collect::<Array1<_>>();
 	unsafe {
 		float_vec_max(
-			(-(-(u.ln())).ln() + p)
+			(-(-(u.ln())).ln() + p_shifted)
 				.as_slice()
-				// safe to unwrap if p is contiguous or in standard order, which
-				// we guarantee because we create p in this function
+				// Safe to unwrap if p is contiguous or in standard order, which
+				// we guarantee because we create p in this function.
 				.unwrap_unchecked(),
 		)
-		.map(|(idx, _val)| idx)
+		.map(|(idx, _)| idx)
 	}
 }
 

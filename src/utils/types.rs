@@ -10,15 +10,21 @@ pub type ClusterLabel = u32;
 pub(crate) struct Array1Wrapper<T>(pub(crate) Array1<T>);
 
 impl<T> From<Array1Wrapper<T>> for Array1<T> {
-	fn from(matrix: Array1Wrapper<T>) -> Self { matrix.0 }
+	fn from(matrix: Array1Wrapper<T>) -> Self {
+		matrix.0
+	}
 }
 
 impl<'a, T> From<&'a Array1Wrapper<T>> for &'a Array1<T> {
-	fn from(matrix: &'a Array1Wrapper<T>) -> Self { &matrix.0 }
+	fn from(matrix: &'a Array1Wrapper<T>) -> Self {
+		&matrix.0
+	}
 }
 
 impl<'a, T> From<&'a mut Array1Wrapper<T>> for &'a mut Array1<T> {
-	fn from(matrix: &'a mut Array1Wrapper<T>) -> Self { &mut matrix.0 }
+	fn from(matrix: &'a mut Array1Wrapper<T>) -> Self {
+		&mut matrix.0
+	}
 }
 
 impl<'py, T: numpy::Element> IntoPyObject<'py> for Array1Wrapper<T> {
@@ -46,15 +52,21 @@ impl<'py, T: numpy::Element> IntoPyObject<'py> for &Array1Wrapper<T> {
 pub(crate) struct Array2Wrapper<T>(pub(crate) Array2<T>);
 
 impl<T> From<Array2Wrapper<T>> for Array2<T> {
-	fn from(matrix: Array2Wrapper<T>) -> Self { matrix.0 }
+	fn from(matrix: Array2Wrapper<T>) -> Self {
+		matrix.0
+	}
 }
 
 impl<'a, T> From<&'a Array2Wrapper<T>> for &'a Array2<T> {
-	fn from(matrix: &'a Array2Wrapper<T>) -> Self { &matrix.0 }
+	fn from(matrix: &'a Array2Wrapper<T>) -> Self {
+		&matrix.0
+	}
 }
 
 impl<'a, T> From<&'a mut Array2Wrapper<T>> for &'a mut Array2<T> {
-	fn from(matrix: &'a mut Array2Wrapper<T>) -> Self { &mut matrix.0 }
+	fn from(matrix: &'a mut Array2Wrapper<T>) -> Self {
+		&mut matrix.0
+	}
 }
 
 impl<'py, T: numpy::Element> IntoPyObject<'py> for Array2Wrapper<T> {
@@ -76,4 +88,3 @@ impl<'py, T: numpy::Element> IntoPyObject<'py> for &Array2Wrapper<T> {
 		Ok(PyArray2::from_array(py, &self.0))
 	}
 }
-

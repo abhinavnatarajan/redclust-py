@@ -70,7 +70,6 @@ impl LikelihoodOptions {
 	}
 }
 
-
 #[cfg(feature = "python-module")]
 #[pymethods]
 impl LikelihoodOptions {

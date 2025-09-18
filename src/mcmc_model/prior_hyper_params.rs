@@ -14,8 +14,8 @@ use statrs::distribution::{Beta, Gamma};
 
 use super::{InterClusterDissimilarityPrior, IntraClusterDissimilarityPrior};
 use crate::{
-	Array1Wrapper,
 	mcmc_model::{ClusterSizePrior, NumClustersPrior},
+	utils::Array1Wrapper,
 	utils::get_rng,
 };
 
@@ -286,10 +286,14 @@ impl PriorHyperParams {
 	}
 
 	/// Prior distribution on r.
-	pub fn r_prior(&self) -> Result<Gamma> { Ok(Gamma::new(self.eta, self.sigma)?) }
+	pub fn r_prior(&self) -> Result<Gamma> {
+		Ok(Gamma::new(self.eta, self.sigma)?)
+	}
 
 	/// Prior distribution on p.
-	pub fn p_prior(&self) -> Result<Beta> { Ok(Beta::new(self.u, self.v)?) }
+	pub fn p_prior(&self) -> Result<Beta> {
+		Ok(Beta::new(self.u, self.v)?)
+	}
 
 	/// Induced prior on cluster sizes.
 	pub fn cluster_size_prior(&self) -> Result<ClusterSizePrior> {
@@ -467,7 +471,9 @@ impl PriorHyperParams {
 
 	/// Create a default instance of this struct.
 	#[new]
-	pub fn py_new() -> Self { PriorHyperParams::default() }
+	pub fn py_new() -> Self {
+		PriorHyperParams::default()
+	}
 
 	/// Sample r from its prior.
 	#[pyo3(name = "sample_r")]
@@ -580,5 +586,7 @@ impl PriorHyperParams {
 	}
 
 	/// Convert the PriorHyperParams object to a dictionary.
-	fn as_dict(&self) -> HashMap<String, f64> { HashMap::from(self) }
+	fn as_dict(&self) -> HashMap<String, f64> {
+		HashMap::from(self)
+	}
 }

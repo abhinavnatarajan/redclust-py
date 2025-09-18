@@ -4,18 +4,19 @@ use pyo3::wrap_pymodule;
 
 pub mod mcmc;
 mod mcmc_data;
+mod mcmc_model;
 mod mcmc_options;
 mod mcmc_result;
 mod mcmc_state;
-mod mcmc_model;
 mod utils;
 
-pub use mcmc_data::*;
-pub use mcmc_options::*;
-pub use mcmc_result::*;
-pub use mcmc_state::*;
-pub use mcmc_model::*;
-use utils::*;
+pub use mcmc_data::MCMCData;
+pub use mcmc_model::{LikelihoodOptions, PriorHyperParams};
+pub use mcmc_options::MCMCOptions;
+pub use mcmc_result::MCMCResult;
+pub use mcmc_state::MCMCState;
+use mcmc_state::sampling::MCMCHelper;
+pub use utils::ClusterLabel;
 
 /// Bayesian distance clustering using cohesion and repulsion.
 #[pymodule]

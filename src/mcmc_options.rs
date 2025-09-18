@@ -59,7 +59,9 @@ impl Default for MCMCOptions {
 
 impl MCMCOptions {
 	/// Create a new MCMCOptions instance with the specified parameters.
-	pub fn new() -> Self { Self::default() }
+	pub fn new() -> Self {
+		Self::default()
+	}
 
 	/// Get the number of samples after burn-in and thinning.
 	#[inline(always)]
@@ -91,7 +93,9 @@ impl Display for MCMCOptions {
 impl MCMCOptions {
 	/// Get the number of samples after burn-in and thinning.
 	#[getter(num_samples)]
-	fn py_num_samples(&self) -> usize { self.num_samples() }
+	fn py_num_samples(&self) -> usize {
+		self.num_samples()
+	}
 
 	/// Create a new MCMCOptions instance with the specified parameters.
 	#[new]
