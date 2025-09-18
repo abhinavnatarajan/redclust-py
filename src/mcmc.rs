@@ -1,4 +1,4 @@
-use std::thread;
+use std::{collections::BTreeSet, thread};
 
 use anyhow::{Result, anyhow};
 use itertools::Itertools;
@@ -11,21 +11,24 @@ use statrs::{
 	function::gamma::ln_gamma,
 };
 
+pub(super) mod state;
+pub use state::State;
+use state::helper::StateHelper;
+
 use crate::{
-	LikelihoodOptions, MCMCData, MCMCHelper, MCMCOptions, MCMCResult, MCMCState, PriorHyperParams,
-	utils::{get_rng, num_pairs, symm_mat_sum},
+	utils::{get_rng, num_pairs, symm_mat_sum}, LikelihoodOptions, MCMCData, MCMCOptions, MCMCResult, PriorHyperParams
 };
+
 /// Log-likelihood of the clustering, which depends on the data and the cluster
 /// labels. Will only consider the first n points in the data where
 /// ``n=state.clust_labels.len()``.
 pub fn ln_likelihood(
-	state: &MCMCState,
+	state: &State,
 	data: &MCMCData,
 	prior_params: &PriorHyperParams,
 	likelihood_options: &LikelihoodOptions,
 ) -> f64 {
-	let clust_labels = &state.clust_labels;
-	let clust_list = state.clust_list.iter().copied().collect_vec();
+	let nonempty_clusts = state.nonempty_clusters().iter().copied().collect_vec();
 	let diss_mat = data.dissimilarities();
 	let ln_diss_mat = data.ln_dissimilarities();
 	let alpha = prior_params.alpha();
@@ -35,10 +38,10 @@ pub fn ln_likelihood(
 	let lgamma_delta1 = ln_gamma(delta1);
 
 	// Cohesive part of likelihood
-	let lik_cohesive = clust_list
+	let lik_cohesive = nonempty_clusts
 		.iter()
 		.map(|k| {
-			let clust_k = clust_labels.iter().positions(|x| *x == *k).collect_vec();
+			let clust_k = state.items_with_label(*k);
 			let sz_k = clust_k.len();
 			let num_pairs_k = num_pairs(sz_k as u64) as f64;
 			let a = alpha + delta1 * num_pairs_k;
@@ -61,21 +64,15 @@ pub fn ln_likelihood(
 	let zeta_gamma_ratio = zeta * gamma.ln() - ln_gamma(zeta);
 	let delta2 = prior_params.delta2();
 	let lgamma_delta2 = ln_gamma(delta2);
-	let n_clusts = state.num_clusts().get();
+	let n_clusts = nonempty_clusts.len();
 	let lik_repulsive = (0..n_clusts)
 		.into_par_iter()
 		.map(|k| {
-			let clust_k = clust_labels
-				.iter()
-				.positions(|x| *x == clust_list[k])
-				.collect_vec();
+			let clust_k = state.items_with_label(nonempty_clusts[k]);
 			let sz_k = clust_k.len();
 			(k + 1..n_clusts)
 				.map(|t| {
-					let clust_t = clust_labels
-						.iter()
-						.positions(|x| *x == clust_list[t])
-						.collect_vec();
+					let clust_t = state.items_with_label(nonempty_clusts[t]);
 					let sz_t = clust_t.len();
 					let num_pairs_kt = (sz_k * sz_t) as f64;
 					let z = zeta + delta2 * num_pairs_kt;
@@ -93,12 +90,22 @@ pub fn ln_likelihood(
 }
 
 /// Log-prior of the clustering, which depends only on the cluster sizes.
-pub fn ln_prior(mcmc_state: &MCMCState, prior_params: &PriorHyperParams) -> f64 {
-	let n_pts = mcmc_state.clust_labels.len() as f64;
-	let clust_sizes = &mcmc_state.clust_sizes;
-	let n_clusts = mcmc_state.num_clusts().get() as f64;
-	let r = mcmc_state.r;
-	let p = mcmc_state.p;
+pub fn ln_prior(state: &State, prior_params: &PriorHyperParams) -> f64 {
+	let n_pts = state.clust_labels().len();
+	let mut clust_sizes = vec![0; n_pts];
+	let n_pts = n_pts as f64;
+	let nonempty_clusts = state.nonempty_clusters();
+	state
+		.clust_labels()
+		.iter()
+		.counts()
+		.into_iter()
+		.for_each(|(k, v)| {
+			clust_sizes[*k as usize] = v;
+		});
+	let n_clusts = nonempty_clusts.len() as f64;
+	let r = state.r();
+	let p = state.p();
 	let eta = prior_params.eta();
 	let sigma = prior_params.sigma();
 	let u = prior_params.u();
@@ -108,8 +115,7 @@ pub fn ln_prior(mcmc_state: &MCMCState, prior_params: &PriorHyperParams) -> f64 
 		- n_clusts * ln_gamma(r)
 		+ Gamma::new(eta, sigma).unwrap().pdf(r)
 		+ Beta::new(u, v).unwrap().pdf(p)
-		+ mcmc_state
-			.clust_list
+		+ nonempty_clusts
 			.iter()
 			.map(|&j| {
 				let nj = clust_sizes[j as usize] as f64;
@@ -122,38 +128,43 @@ fn run_chain<R: Rng>(
 	data: &MCMCData,
 	prior_params: &PriorHyperParams,
 	likelihood_options: &LikelihoodOptions,
-	init_state: &MCMCState,
+	init_state: State,
 	mcmc_options: &MCMCOptions,
 	rng: &mut R,
 ) -> Result<MCMCResult> {
-	let mut state = init_state.clone();
-	let mut helper = MCMCHelper::new(data, prior_params, likelihood_options, mcmc_options);
+	let state = init_state.clone();
+	let mut helper = StateHelper::new(
+		data,
+		prior_params,
+		likelihood_options,
+		mcmc_options,
+		init_state,
+	);
 	let n_samples = mcmc_options.num_samples();
 	let n_pts = data.num_points().get();
 	let mut result = MCMCResult::with_capacity(n_pts, n_samples);
 	if n_samples != 0 {
 		for _ in 0..mcmc_options.num_burnin {
-			state
-				.sample_r_conditional(prior_params, rng)?
-				.sample_p_conditional(prior_params, rng)?;
+			helper
+				.sample_r_conditional(rng)?
+				.sample_p_conditional(rng)?;
 		}
 		let mut j = 0;
 		for i in mcmc_options.num_burnin..mcmc_options.num_iter {
-			state
-				.sample_r_conditional(prior_params, rng)?
-				.sample_p_conditional(prior_params, rng)?
-				.sample_cluster_labels(&mut helper, rng)?;
-			if state.r_accepted {
+			helper
+				.sample_r_conditional(rng)?
+				.sample_p_conditional(rng)?
+				.sample_cluster_labels(rng)?;
+			if helper.r_accepted {
 				result.r_acceptance_rate += 1.0;
 			}
-			result.splitmerge_acceptance_rate += state.splitmerge_accepted as f64;
+			result.splitmerge_acceptance_rate += helper.splitmerge_accepted as f64;
 			if (i - mcmc_options.num_burnin) % mcmc_options.thinning == 0 {
-				result.clusts[j].extend(state.clust_labels.iter());
-				result.num_clusts[j] = state.num_clusts().get();
-				result.r[j] = state.r;
-				result.p[j] = state.p;
-				result.ln_likelihood[j] =
-					ln_likelihood(&state, data, prior_params, likelihood_options);
+				result.clusts[j].extend(helper.state.clust_labels().iter());
+				result.num_clusts[j] = helper.num_clusts().get();
+				result.r[j] = state.r();
+				result.p[j] = state.p();
+				result.ln_likelihood[j] = helper.ln_lik();
 				result.ln_posterior[j] = result.ln_likelihood[j] + ln_prior(&state, prior_params);
 				j += 1;
 			}
@@ -168,7 +179,7 @@ pub fn run_sampler(
 	data: &MCMCData,
 	prior_params: &PriorHyperParams,
 	likelihood_options: &LikelihoodOptions,
-	init_state: &MCMCState,
+	init_state: State,
 	mcmc_options: &MCMCOptions,
 ) -> Result<MCMCResult> {
 	// Check that data and params are compatible
@@ -188,13 +199,14 @@ pub fn run_sampler(
 		));
 	}
 	// Check that params and init_state are compatible
-	if !(likelihood_options.min_num_clusts()..=likelihood_options.max_num_clusts())
-		.contains(&init_state.num_clusts())
+	let init_num_clusts = BTreeSet::from_iter(init_state.clust_labels().iter().copied()).len();
+	if !(likelihood_options.min_num_clusts().get()..=likelihood_options.max_num_clusts().get())
+		.contains(&init_num_clusts)
 	{
 		return Err(anyhow!(
 			"Initial state has {} clusters, which is incompatible with the parameters given where \
 			 the number of clusters must be in [{} and {}]",
-			init_state.num_clusts(),
+			init_num_clusts,
 			likelihood_options.min_num_clusts(),
 			likelihood_options.max_num_clusts()
 		));
@@ -205,15 +217,18 @@ pub fn run_sampler(
 			.map(|_| {
 				rng.jump();
 				let mut thread_rng = rng.clone();
-				s.spawn(move || {
-					run_chain(
-						data,
-						prior_params,
-						likelihood_options,
-						init_state,
-						mcmc_options,
-						&mut thread_rng,
-					)
+				s.spawn({
+					let value = init_state.clone();
+					move || {
+						run_chain(
+							data,
+							prior_params,
+							likelihood_options,
+							value,
+							mcmc_options,
+							&mut thread_rng,
+						)
+					}
 				})
 			})
 			.map(|handle| handle.join().unwrap())
@@ -240,7 +255,7 @@ pub(crate) fn py_run_sampler(
 	prior_params: &PriorHyperParams,
 	likelihood_options: &LikelihoodOptions,
 	mcmc_options: &MCMCOptions,
-	init_state: &mut MCMCState,
+	init_state: State,
 ) -> Result<MCMCResult> {
 	run_sampler(
 		data,

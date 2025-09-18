@@ -1,7 +1,6 @@
 use std::{
 	collections::BTreeSet,
 	fmt::{Debug, Display, Formatter},
-	num::NonZeroUsize,
 };
 
 use accessory::Accessors;
@@ -11,7 +10,7 @@ use itertools::Itertools;
 use pyo3::prelude::*;
 
 use crate::ClusterLabel;
-pub mod sampling;
+pub(super) mod helper;
 
 const DEFAULT_R: f64 = 1.0;
 const DEFAULT_P: f64 = 0.5;
@@ -22,38 +21,19 @@ const DEFAULT_P: f64 = 0.5;
 /// ClusterLabel::MAX is used to indicate a data point without an assigned
 /// cluster label.
 #[derive(Debug, Clone, Accessors, PartialEq)]
-#[access(get)]
+#[access(get, defaults(get(cp)))]
 #[cfg_attr(feature = "python-module", pyclass(get_all, str, eq))]
-pub struct MCMCState {
+pub struct State {
 	/// Current cluster allocation.
 	#[access(get(cp = false))]
-	pub(crate) clust_labels: Vec<ClusterLabel>,
-
+	clust_labels: Vec<ClusterLabel>,
 	/// Parameter r.
-	pub(crate) r: f64,
-
-	/// Whether the last proposal for the parameter r was accepted.
-	#[access(get(skip))]
-	pub(crate) r_accepted: bool,
-
+	r: f64,
 	/// Parameter p.
-	pub(crate) p: f64,
-
-	/// Cluster sizes.
-	#[access(get(cp = false))]
-	pub(crate) clust_sizes: Vec<usize>,
-
-	/// List of labels of non-empty clusters.
-	#[access(get(cp = false))]
-	pub(crate) clust_list: BTreeSet<ClusterLabel>,
-
-	/// Number of split-merge proposals that were accepted
-	/// in the most recent label sampling step.
-	#[access(get(skip))]
-	pub(crate) splitmerge_accepted: usize,
+	p: f64,
 }
 
-impl MCMCState {
+impl State {
 	/// Set the parameter r. Useful to initialize a custom state when starting
 	/// the MCMC sampler.
 	fn set_r(&mut self, r: f64) -> Result<&mut Self> {
@@ -108,65 +88,7 @@ impl MCMCState {
 			));
 		}
 		self.clust_labels = clusts;
-		self.clust_sizes = vec![0; self.clust_labels.len()];
-		self.clust_labels
-			.iter()
-			.counts()
-			.into_iter()
-			.for_each(|(k, v)| {
-				self.clust_sizes[*k as usize] = v;
-				self.clust_list.insert(*k);
-			});
 		Ok(self)
-	}
-
-	/// Updates the cluster assignment for a data point.
-	fn update_clust(&mut self, point_idx: usize, new_clust_label: ClusterLabel) {
-		if new_clust_label != ClusterLabel::MAX {
-			let old_clust_label = self.clust_labels[point_idx];
-			let old_clust_size = &mut self.clust_sizes[old_clust_label as usize];
-			*old_clust_size -= 1;
-			if *old_clust_size == 0 {
-				self.clust_list.remove(&old_clust_label);
-			}
-			self.clust_labels[point_idx] = new_clust_label;
-			self.clust_sizes[new_clust_label as usize] += 1;
-			self.clust_list.insert(new_clust_label);
-		} else {
-			self.delete_point(point_idx);
-		}
-	}
-
-	/// Remove the cluster assignment for a data point.
-	/// Does nothing if the point is already unassigned.
-	fn delete_point(&mut self, point_idx: usize) {
-		let item_clust = &mut self.clust_labels[point_idx];
-		if *item_clust != ClusterLabel::MAX {
-			let old_clust_label = *item_clust;
-			let old_clust_size = &mut self.clust_sizes[old_clust_label as usize];
-			*old_clust_size -= 1;
-			if *old_clust_size == 0 {
-				self.clust_list.remove(&old_clust_label);
-			}
-			*item_clust = ClusterLabel::MAX;
-		}
-	}
-
-	/// Get the list of elements with a given cluster label.
-	fn items_with_label(&self, clust_label: ClusterLabel) -> Vec<usize> {
-		self.clust_labels
-			.iter()
-			.positions(|&x| x == clust_label)
-			.collect_vec()
-	}
-
-	/// Find the first empty cluster label.
-	fn first_empty_cluster(&self) -> Option<ClusterLabel> {
-		self.clust_sizes
-			.iter()
-			.position(|&x| x == 0)
-			.map(|x| x as ClusterLabel)
-			.filter(|&x| x != ClusterLabel::MAX)
 	}
 
 	/// Set the cluster allocations. Useful to initialize a custom state when
@@ -177,39 +99,37 @@ impl MCMCState {
 		Ok(self)
 	}
 
-	/// Number of clusters.
-	#[inline(always)]
-	pub fn num_clusts(&self) -> NonZeroUsize { NonZeroUsize::new(self.clust_list.len()).unwrap() }
-
-	/// Size of a cluster.
-	#[inline(always)]
-	pub fn clust_size(&self, clust_label: ClusterLabel) -> usize {
-		self.clust_sizes[clust_label as usize]
+	/// Get the list of elements with a given cluster label.
+	pub fn items_with_label(&self, clust_label: ClusterLabel) -> Vec<usize> {
+		self.clust_labels
+			.iter()
+			.positions(|&x| x == clust_label)
+			.collect_vec()
 	}
 
 	pub fn new(clusts: Vec<ClusterLabel>, r: Option<f64>, p: Option<f64>) -> Result<Self> {
-		let res = MCMCState {
+		let res = State {
 			clust_labels: Vec::new(),
 			r: DEFAULT_R,
 			p: DEFAULT_P,
-			r_accepted: true,
-			clust_sizes: Vec::new(),
-			clust_list: BTreeSet::new(),
-			splitmerge_accepted: 0,
 		}; // we don't implement Default for MCMCState because an empty cluster list is invalid
 		res.with_clusts(clusts)
 			.and_then(|this| this.with_r(r.unwrap_or(DEFAULT_R)))
 			.and_then(|this| this.with_p(p.unwrap_or(DEFAULT_P)))
 	}
+
+	pub fn nonempty_clusters(&self) -> BTreeSet<ClusterLabel> {
+		BTreeSet::<ClusterLabel>::from_iter(self.clust_labels.iter().copied())
+	}
 }
 
-impl Display for MCMCState {
+impl Display for State {
 	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> { Debug::fmt(self, f) }
 }
 
 #[cfg(feature = "python-module")]
 #[pymethods]
-impl MCMCState {
+impl State {
 	#[new]
 	#[pyo3(signature = (clusts, r = DEFAULT_R, p = DEFAULT_P))]
 	pub fn py_new(clusts: Vec<ClusterLabel>, r: Option<f64>, p: Option<f64>) -> Result<Self> {
@@ -232,8 +152,4 @@ impl MCMCState {
 	/// the MCMC sampler.
 	#[setter(p)]
 	fn py_set_p(&mut self, p: f64) -> Result<()> { self.set_p(p).map(|_| ()) }
-
-	/// Number of clusters.
-	#[getter]
-	pub fn py_num_clusts(&self) -> NonZeroUsize { self.num_clusts() }
 }

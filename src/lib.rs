@@ -7,15 +7,13 @@ mod mcmc_data;
 mod mcmc_model;
 mod mcmc_options;
 mod mcmc_result;
-mod mcmc_state;
 mod utils;
 
+pub use mcmc::state::State;
 pub use mcmc_data::MCMCData;
 pub use mcmc_model::{LikelihoodOptions, PriorHyperParams};
 pub use mcmc_options::MCMCOptions;
 pub use mcmc_result::MCMCResult;
-pub use mcmc_state::MCMCState;
-use mcmc_state::sampling::MCMCHelper;
 pub use utils::ClusterLabel;
 
 /// Bayesian distance clustering using cohesion and repulsion.
@@ -25,7 +23,7 @@ fn redclust(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<PriorHyperParams>()?;
 	m.add_class::<MCMCData>()?;
 	m.add_class::<MCMCResult>()?;
-	m.add_class::<MCMCState>()?;
+	m.add_class::<State>()?;
 	m.add_function(wrap_pyfunction!(mcmc::py_run_sampler, m)?)?;
 	m.add_wrapped(wrap_pymodule!(mcmc_model::mcmc_model_pymodule))?;
 	Ok(())

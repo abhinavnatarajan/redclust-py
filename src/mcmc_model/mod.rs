@@ -15,7 +15,7 @@ use statrs::{
 };
 
 use crate::{
-	ClusterLabel, MCMCData, MCMCOptions, MCMCState,
+	ClusterLabel, MCMCData, MCMCOptions, State,
 	utils::{fit_beta_mle, fit_gamma_mle, get_rng, knee_pos, pmf, sample_from_ln_probs},
 };
 
@@ -107,7 +107,7 @@ pub fn init_from_data<R: Rng>(
 	mle_iters: NonZeroUsize,
 	mcmc_iters_n_clusts: NonZeroUsize,
 	rng: &mut R,
-) -> Result<(MCMCState, PriorHyperParams)> {
+) -> Result<(State, PriorHyperParams)> {
 	let mut result = PriorHyperParams::default();
 	let n_pts = data.num_points();
 	let min_num_clusts = model_options.min_num_clusts().get();
@@ -202,7 +202,7 @@ pub fn init_from_data<R: Rng>(
 	.map_err(|e| anyhow!("Error setting prior parameters: {}", e))?;
 
 	// Set the initial state
-	let init_state = MCMCState::new(
+	let init_state = State::new(
 		clust_labels,
 		Some(result.r_prior()?.sample(rng)),
 		Some(result.p_prior()?.sample(rng)),
@@ -305,7 +305,7 @@ fn py_init_from_data(
 	mle_iters: NonZeroUsize,
 	mcmc_iters_n_clusts: NonZeroUsize,
 	rng_seed: Option<u64>,
-) -> Result<(MCMCState, PriorHyperParams)> {
+) -> Result<(State, PriorHyperParams)> {
 	let mut rng = get_rng(rng_seed);
 	init_from_data(
 		data,
@@ -332,7 +332,7 @@ fn pre_sample_rp<R: Rng>(
 ) -> Result<(Array1<f64>, Array1<f64>)> {
 	let r = params.r_prior()?.sample(rng);
 	let p = params.p_prior()?.sample(rng);
-	let mut state = MCMCState::new(clust_labels.to_owned(), Some(r), Some(p))?;
+	let mut state = State::new(clust_labels.to_owned(), Some(r), Some(p))?;
 	let n_samples = options.num_samples();
 	let (mut r_samples, mut p_samples) =
 		(Vec::with_capacity(n_samples), Vec::with_capacity(n_samples));
