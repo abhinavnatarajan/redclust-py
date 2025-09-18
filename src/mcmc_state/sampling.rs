@@ -10,9 +10,14 @@ use statrs::{
 };
 
 use crate::{
+	LikelihoodOptions,
+	MCMCState,
+	ClusterLabel,
+	MCMCData,
+	MCMCOptions,
+	PriorHyperParams,
 	mcmc::ln_likelihood,
 	utils::{row_sum, sample_from_ln_probs},
-	*,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -318,10 +323,7 @@ impl MCMCState {
 
 			// Pick chaperones
 			let range = 0..n_pts;
-			let (i, j): (usize, usize) = (
-				rng.gen_range(range.clone()),
-				rng.gen_range(range),
-			);
+			let (i, j): (usize, usize) = (rng.gen_range(range.clone()), rng.gen_range(range));
 			let ci = self.clust_labels[i];
 			let cj = self.clust_labels[j];
 			if ci == cj {
