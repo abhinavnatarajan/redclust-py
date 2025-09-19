@@ -120,8 +120,8 @@ pub struct MCMCResult {
 	pub(crate) r_acceptance_rate: f64,
 }
 
-#[pyclass(eq, eq_int)]
 #[derive(PartialEq, Debug, Clone, Copy)]
+#[cfg_attr(feature="python-module", pyclass(eq, eq_int))]
 pub enum PointEstimatorMethod {
 	/// Maximum likelihood estimate (MLE).
 	MaxLikelihood,

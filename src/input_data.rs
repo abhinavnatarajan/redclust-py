@@ -19,7 +19,7 @@ use crate::{
 /// Struct to hold the dissimilarities matrix.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "python-module", pyclass(str))]
-pub struct MCMCData {
+pub struct InputData {
 	/// Dissimlarities matrix.
 	dissimilarities: Array2Wrapper<f64>,
 
@@ -27,7 +27,7 @@ pub struct MCMCData {
 	ln_dissimilarities: Array2Wrapper<f64>,
 }
 
-impl MCMCData {
+impl InputData {
 	/// Check whether the dissimilarity matrix is non-empty, square, and that
 	/// the dissimilarities are symmetric positive-definite.
 	fn validate_dissimilarities(diss_mat: Array2<f64>) -> Result<Array2<f64>> {
@@ -55,7 +55,7 @@ impl MCMCData {
 			));
 		}
 		if diss_mat.iter().any(|x| *x < 0.0) {
-			return Err(anyhow!("Off-diagonal entries must be strictly positive."));
+			return Err(anyhow!("Off-diagonal entries must be non-negative."));
 		}
 		Ok(diss_mat)
 	}
@@ -70,7 +70,7 @@ impl MCMCData {
 				if ln_diss_mat.iter().any(|x| x.is_nan()) {
 					return Err(anyhow!("Found NaN in the log of the dissimilarity matrix."));
 				}
-				Ok(MCMCData {
+				Ok(InputData {
 					dissimilarities: Array2Wrapper(diss_mat),
 					ln_dissimilarities: Array2Wrapper(ln_diss_mat),
 				})
@@ -80,7 +80,7 @@ impl MCMCData {
 
 	/// Create a new MCMCData instance with the specified point cloud using the
 	/// standard Euclidean 2-norm. The input should be a non-empty 2D array of
-	/// shape (n_pts, n_dims).
+	/// shape `(n_pts, n_dims)`.
 	pub fn from_points(points: Array2<f64>) -> Result<Self> {
 		let n_pts = points.nrows();
 		if Zip::from(&points).any(|&x| x.is_nan()) {
@@ -176,7 +176,7 @@ impl MCMCData {
 	}
 }
 
-impl Display for MCMCData {
+impl Display for InputData {
 	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
 		write!(f, "MCMCData {{\ndiss_mat:\n{}\n}}", self.dissimilarities)
 	}
@@ -184,7 +184,7 @@ impl Display for MCMCData {
 
 #[cfg(feature = "python-module")]
 #[pymethods]
-impl MCMCData {
+impl InputData {
 	/// Create a new MCMCData instance with the specified dissimilarities
 	/// matrix. The matrix must be non-empty, symmetric, with non-negative
 	/// entries that are zero on the diagonal.

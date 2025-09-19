@@ -13,22 +13,20 @@ use statrs::{
 
 pub(super) mod state;
 pub use state::State;
-use state::helper::StateHelper;
+pub(crate) use state::helper::StateHelper;
 
 use crate::{
-	utils::{get_rng, num_pairs, symm_mat_sum}, LikelihoodOptions, MCMCData, MCMCOptions, MCMCResult, PriorHyperParams
+	utils::{get_rng, num_pairs, symm_mat_sum}, LikelihoodOptions, InputData, MCMCOptions, MCMCResult, PriorHyperParams
 };
 
-/// Log-likelihood of the clustering, which depends on the data and the cluster
-/// labels. Will only consider the first n points in the data where
-/// ``n=state.clust_labels.len()``.
+/// Compute the log-likelihood of the model given the data and clustering state.
 pub fn ln_likelihood(
 	state: &State,
-	data: &MCMCData,
+	data: &InputData,
 	prior_params: &PriorHyperParams,
 	likelihood_options: &LikelihoodOptions,
 ) -> f64 {
-	let nonempty_clusts = state.nonempty_clusters().iter().copied().collect_vec();
+	let nonempty_clusts = state.clust_set().iter().copied().collect_vec();
 	let diss_mat = data.dissimilarities();
 	let ln_diss_mat = data.ln_dissimilarities();
 	let alpha = prior_params.alpha();
@@ -54,7 +52,7 @@ pub fn ln_likelihood(
 		})
 		.sum::<f64>();
 
-	if !likelihood_options.repulsion() {
+	if !likelihood_options.repulsion {
 		return lik_cohesive;
 	};
 
@@ -94,7 +92,7 @@ pub fn ln_prior(state: &State, prior_params: &PriorHyperParams) -> f64 {
 	let n_pts = state.clust_labels().len();
 	let mut clust_sizes = vec![0; n_pts];
 	let n_pts = n_pts as f64;
-	let nonempty_clusts = state.nonempty_clusters();
+	let nonempty_clusts = state.clust_set();
 	state
 		.clust_labels()
 		.iter()
@@ -125,7 +123,7 @@ pub fn ln_prior(state: &State, prior_params: &PriorHyperParams) -> f64 {
 }
 
 fn run_chain<R: Rng>(
-	data: &MCMCData,
+	data: &InputData,
 	prior_params: &PriorHyperParams,
 	likelihood_options: &LikelihoodOptions,
 	init_state: State,
@@ -164,7 +162,7 @@ fn run_chain<R: Rng>(
 				result.num_clusts[j] = helper.num_clusts().get();
 				result.r[j] = state.r();
 				result.p[j] = state.p();
-				result.ln_likelihood[j] = helper.ln_lik();
+				result.ln_likelihood[j] = helper.ln_likelihood();
 				result.ln_posterior[j] = result.ln_likelihood[j] + ln_prior(&state, prior_params);
 				j += 1;
 			}
@@ -175,8 +173,9 @@ fn run_chain<R: Rng>(
 	Ok(result)
 }
 
+/// Run the MCMC sampler.
 pub fn run_sampler(
-	data: &MCMCData,
+	data: &InputData,
 	prior_params: &PriorHyperParams,
 	likelihood_options: &LikelihoodOptions,
 	init_state: State,
@@ -248,10 +247,9 @@ pub fn run_sampler(
 	}
 }
 
-#[pyfunction]
-#[pyo3(name = "run_sampler")]
+#[cfg_attr(feature="python-module", pyfunction, pyo3(name="run_sampler"))]
 pub(crate) fn py_run_sampler(
-	data: &MCMCData,
+	data: &InputData,
 	prior_params: &PriorHyperParams,
 	likelihood_options: &LikelihoodOptions,
 	mcmc_options: &MCMCOptions,

@@ -9,15 +9,15 @@ use anyhow::{Result, anyhow};
 #[cfg(feature = "python-module")]
 use pyo3::{prelude::*, types::PyDict};
 
-/// Parameters that modify the underlying clustering algorithm.
+/// Parameters that modify the underlying likelihood model.
 #[derive(Debug, Clone, Accessors, PartialEq)]
 #[access(get, defaults(get(cp)))]
 #[cfg_attr(feature = "python-module", pyclass(get_all, str, eq))]
 pub struct LikelihoodOptions {
 	/// Whether to use repulsive terms in the likelihood function when
 	/// clustering.
-	#[access(set)]
-	repulsion: bool,
+	#[access(get(skip))]
+	pub repulsion: bool,
 
 	/// Minimum number of clusters to allow in the clustering.
 	min_num_clusts: NonZeroUsize,
@@ -84,6 +84,7 @@ impl LikelihoodOptions {
 		Ok(())
 	}
 
+	/// Convert this object to a Python dictionary.
 	fn as_dict(this: Bound<'_, Self>) -> Result<Bound<'_, PyDict>> {
 		let this = this.borrow();
 		let dict: Bound<'_, PyDict> = PyDict::new(this.py());

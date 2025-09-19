@@ -1,30 +1,40 @@
 //! Bayesian distance clustering using cohesion and repulsion.
-use pyo3::prelude::*;
-use pyo3::wrap_pymodule;
+use pyo3::{prelude::*, wrap_pymodule};
 
-pub mod mcmc;
-mod mcmc_data;
-mod mcmc_model;
+mod input_data;
+mod mcmc;
 mod mcmc_options;
-mod mcmc_result;
+mod model;
+mod result;
 mod utils;
 
+pub use mcmc::ln_likelihood;
+pub use mcmc::ln_prior;
+pub use mcmc::run_sampler;
+pub use input_data::InputData;
 pub use mcmc::state::State;
-pub use mcmc_data::MCMCData;
-pub use mcmc_model::{LikelihoodOptions, PriorHyperParams};
 pub use mcmc_options::MCMCOptions;
-pub use mcmc_result::MCMCResult;
+pub use model::{
+	ClusterSizePrior,
+	InterClusterDissimilarityPrior,
+	LikelihoodOptions,
+	NumClustersPrior,
+	PriorHyperParams,
+};
+pub use result::MCMCResult;
+#[doc(inline)]
 pub use utils::ClusterLabel;
 
 /// Bayesian distance clustering using cohesion and repulsion.
+#[cfg(feature = "python-module")]
 #[pymodule]
 fn redclust(m: &Bound<'_, PyModule>) -> PyResult<()> {
 	m.add_class::<MCMCOptions>()?;
 	m.add_class::<PriorHyperParams>()?;
-	m.add_class::<MCMCData>()?;
+	m.add_class::<InputData>()?;
 	m.add_class::<MCMCResult>()?;
 	m.add_class::<State>()?;
 	m.add_function(wrap_pyfunction!(mcmc::py_run_sampler, m)?)?;
-	m.add_wrapped(wrap_pymodule!(mcmc_model::mcmc_model_pymodule))?;
+	m.add_wrapped(wrap_pymodule!(model::mcmc_model_pymodule))?;
 	Ok(())
 }

@@ -15,7 +15,11 @@ use statrs::{
 };
 
 use crate::{
-	ClusterLabel, MCMCData, MCMCOptions, State,
+	ClusterLabel,
+	InputData,
+	MCMCOptions,
+	State,
+	mcmc::StateHelper,
 	utils::{fit_beta_mle, fit_gamma_mle, get_rng, knee_pos, pmf, sample_from_ln_probs},
 };
 
@@ -101,8 +105,8 @@ impl Distribution<f64> for InterClusterDissimilarityPrior {
 /// Fit a prior hyperparameters from the data, and return an
 /// initialized state for the sampler.
 pub fn init_from_data<R: Rng>(
-	data: &MCMCData,
-	model_options: LikelihoodOptions,
+	data: &InputData,
+	likelihood_options: &LikelihoodOptions,
 	mcmc_iters_rp: NonZeroUsize,
 	mle_iters: NonZeroUsize,
 	mcmc_iters_n_clusts: NonZeroUsize,
@@ -110,8 +114,8 @@ pub fn init_from_data<R: Rng>(
 ) -> Result<(State, PriorHyperParams)> {
 	let mut result = PriorHyperParams::default();
 	let n_pts = data.num_points();
-	let min_num_clusts = model_options.min_num_clusts().get();
-	let max_num_clusts = model_options.max_num_clusts().get();
+	let min_num_clusts = likelihood_options.min_num_clusts().get();
+	let max_num_clusts = likelihood_options.max_num_clusts().get();
 	if !(min_num_clusts..=max_num_clusts).contains(&n_pts.get()) {
 		return Err(anyhow!(
 			"Number of clusters must be between {} and {}.",
@@ -175,6 +179,7 @@ pub fn init_from_data<R: Rng>(
 			num_burnin: 0,
 			..MCMCOptions::default()
 		},
+		likelihood_options,
 		rng,
 	)?;
 	// Use the posterior samples to find maximum likelihood estimates for the
@@ -288,28 +293,29 @@ pub fn init_from_data<R: Rng>(
 /// initialized state for the sampler.
 /// This will modify all prior hyperparameters except for repulsion and the
 /// minimum/maximum number of clusters allowed.
-#[pyfunction(name = "init_from_data",
+#[cfg_attr(feature="python-module", pyfunction(name = "init_from_data",
 		signature = (
 			data,
-			model_options=LikelihoodOptions::default(),
+			likelihood_options=None,
 			mcmc_iters_rp=NONZERO_THOUSAND,
 			mle_iters=NONZERO_THOUSAND,
 			mcmc_iters_n_clusts=NONZERO_THOUSAND,
 			rng_seed=None,
 			)
-		)]
+		))]
 fn py_init_from_data(
-	data: &MCMCData,
-	model_options: LikelihoodOptions,
+	data: &InputData,
+	likelihood_options: Option<&LikelihoodOptions>,
 	mcmc_iters_rp: NonZeroUsize,
 	mle_iters: NonZeroUsize,
 	mcmc_iters_n_clusts: NonZeroUsize,
 	rng_seed: Option<u64>,
 ) -> Result<(State, PriorHyperParams)> {
 	let mut rng = get_rng(rng_seed);
+	let likelihood_options_default = LikelihoodOptions::default();
 	init_from_data(
 		data,
-		model_options,
+		likelihood_options.unwrap_or(&likelihood_options_default),
 		mcmc_iters_rp,
 		mle_iters,
 		mcmc_iters_n_clusts,
@@ -328,27 +334,38 @@ fn pre_sample_rp<R: Rng>(
 	clust_labels: &[ClusterLabel],
 	params: &PriorHyperParams,
 	options: &MCMCOptions,
+	likelihood_options: &LikelihoodOptions,
 	rng: &mut R,
 ) -> Result<(Array1<f64>, Array1<f64>)> {
 	let r = params.r_prior()?.sample(rng);
 	let p = params.p_prior()?.sample(rng);
-	let mut state = State::new(clust_labels.to_owned(), Some(r), Some(p))?;
+	let state = State::new(clust_labels.to_owned(), Some(r), Some(p))?;
+	let n_pts = state.clust_labels().len();
+	let dummy_data = InputData::from_dissimilarities(Array2::<f64>::zeros((n_pts, n_pts))).unwrap();
+	let dummy_mcmc_options = MCMCOptions::default();
+	let mut helper = StateHelper::new(
+		&dummy_data,
+		params,
+		likelihood_options,
+		&dummy_mcmc_options,
+		state,
+	);
 	let n_samples = options.num_samples();
 	let (mut r_samples, mut p_samples) =
 		(Vec::with_capacity(n_samples), Vec::with_capacity(n_samples));
 	if n_samples != 0 {
 		for _ in 0..options.num_burnin {
-			state
-				.sample_r_conditional(params, rng)?
-				.sample_p_conditional(params, rng)?;
+			helper
+				.sample_r_conditional(rng)?
+				.sample_p_conditional(rng)?;
 		}
 		for i in options.num_burnin..options.num_iter {
-			state
-				.sample_r_conditional(params, rng)?
-				.sample_p_conditional(params, rng)?;
+			helper
+				.sample_r_conditional(rng)?
+				.sample_p_conditional(rng)?;
 			if (i - options.num_burnin) % options.thinning == 0 {
-				r_samples.push(state.r);
-				p_samples.push(state.p);
+				r_samples.push(helper.state.r());
+				p_samples.push(helper.state.p());
 			}
 		}
 	}

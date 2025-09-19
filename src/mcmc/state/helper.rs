@@ -12,7 +12,7 @@ use statrs::{
 use crate::{
 	ClusterLabel,
 	LikelihoodOptions,
-	MCMCData,
+	InputData,
 	MCMCOptions,
 	PriorHyperParams,
 	State,
@@ -22,7 +22,7 @@ use crate::{
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct StateHelper<'a> {
 	/// Dissimilarity matrix and related data.
-	data: &'a MCMCData,
+	data: &'a InputData,
 	/// Number of points.
 	n_pts: usize,
 	/// Prior hyperparameters.
@@ -58,7 +58,7 @@ pub(crate) struct StateHelper<'a> {
 
 impl<'a> StateHelper<'a> {
 	pub(crate) fn new(
-		data: &'a MCMCData,
+		data: &'a InputData,
 		prior_params: &'a PriorHyperParams,
 		likelihood_options: &'a LikelihoodOptions,
 		mcmc_options: &'a MCMCOptions,
@@ -74,7 +74,7 @@ impl<'a> StateHelper<'a> {
 		let ln_p = state.p.ln();
 		let n_pts = state.clust_labels.len();
 		let mut clust_sizes = vec![0; n_pts];
-		let nonempty_clusts = state.nonempty_clusters();
+		let nonempty_clusts = state.clust_set();
 		state
 			.clust_labels
 			.iter()
@@ -227,7 +227,7 @@ impl<'a> StateHelper<'a> {
 		let ln_p = self.ln_p;
 		let diss = self.data.dissimilarities();
 		let ln_diss = self.data.ln_dissimilarities();
-		let repulsion = self.likelihood_options.repulsion();
+		let repulsion = self.likelihood_options.repulsion;
 
 		// Compute cohesive likelihood component for each proposed cluster.
 		for (&k, l3_ik, ln_prob_k) in izip!(
@@ -396,7 +396,7 @@ impl<'a> StateHelper<'a> {
 		let max_num_clusts = likelihood_options.max_num_clusts().get();
 		self.splitmerge_accepted = 0;
 
-		let mut ln_lik_cur = self.ln_lik();
+		let mut ln_lik_cur = self.ln_likelihood();
 		for _ in 0..self.mcmc_options.num_mh_steps {
 			let orig_num_clusts = self.num_clusts().get() as f64;
 			let mut split = false;
@@ -495,7 +495,7 @@ impl<'a> StateHelper<'a> {
 					rng,
 				)?;
 			}
-			let ln_lik_new = final_state.ln_lik();
+			let ln_lik_new = final_state.ln_likelihood();
 			let ln_lik_ratio = ln_lik_new - ln_lik_cur;
 			let ln_acceptance_ratio = [0.0, ln_prior_ratio + ln_lik_ratio - ln_proposal_ratio]
 				.iter()
@@ -514,7 +514,7 @@ impl<'a> StateHelper<'a> {
 	/// Log likelihood of the current state.
 	/// Faster than calling mcmc::ln_likelihood because it re-uses pre-computed
 	/// quantities.
-	pub(crate) fn ln_lik(&self) -> f64 {
+	pub(crate) fn ln_likelihood(&self) -> f64 {
 		let nonempty_clusts = &self.nonempty_clusts.iter().copied().collect_vec();
 		let diss_mat = self.data.dissimilarities();
 		let ln_diss_mat = self.data.ln_dissimilarities();
@@ -522,8 +522,8 @@ impl<'a> StateHelper<'a> {
 		let beta = self.prior_params.beta();
 		let alpha_beta_ratio = self.alpha_beta_ratio;
 		let delta1 = self.prior_params.delta1();
-		let lgamma_delta1 = ln_gamma(delta1);
-		let repulsion = self.likelihood_options.repulsion();
+		let lgamma_delta1 = self.ln_gamma_delta1;
+		let repulsion = self.likelihood_options.repulsion;
 
 		// Cohesive part of likelihood
 		let lik_cohesive = nonempty_clusts
@@ -553,7 +553,6 @@ impl<'a> StateHelper<'a> {
 		let lgamma_delta2 = ln_gamma(delta2);
 		let n_clusts = self.num_clusts().get();
 		let lik_repulsive = (0..n_clusts)
-			.into_iter()
 			.map(|k| {
 				let clust_k = self.state.items_with_label(nonempty_clusts[k]);
 				let sz_k = clust_k.len();
