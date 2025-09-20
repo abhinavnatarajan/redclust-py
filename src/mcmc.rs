@@ -20,6 +20,7 @@ use crate::{
 };
 
 /// Compute the log-likelihood of the model given the data and clustering state.
+#[cfg_attr(feature="python-module", pyfunction)]
 pub fn ln_likelihood(
 	state: &State,
 	data: &InputData,
@@ -88,6 +89,7 @@ pub fn ln_likelihood(
 }
 
 /// Log-prior of the clustering, which depends only on the cluster sizes.
+#[cfg_attr(feature="python-module", pyfunction)]
 pub fn ln_prior(state: &State, prior_params: &PriorHyperParams) -> f64 {
 	let n_pts = state.clust_labels().len();
 	let mut clust_sizes = vec![0; n_pts];
@@ -174,6 +176,7 @@ fn run_chain<R: Rng>(
 }
 
 /// Run the MCMC sampler.
+#[cfg_attr(feature="python-module", pyfunction)]
 pub fn run_sampler(
 	data: &InputData,
 	prior_params: &PriorHyperParams,
@@ -245,21 +248,4 @@ pub fn run_sampler(
 				.unwrap())
 		}
 	}
-}
-
-#[cfg_attr(feature="python-module", pyfunction, pyo3(name="run_sampler"))]
-pub(crate) fn py_run_sampler(
-	data: &InputData,
-	prior_params: &PriorHyperParams,
-	likelihood_options: &LikelihoodOptions,
-	mcmc_options: &MCMCOptions,
-	init_state: State,
-) -> Result<MCMCResult> {
-	run_sampler(
-		data,
-		prior_params,
-		likelihood_options,
-		init_state,
-		mcmc_options,
-	)
 }
